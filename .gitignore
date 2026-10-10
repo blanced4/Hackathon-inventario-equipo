@@ -1,3 +1,4 @@
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,8 +26,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment variables (SECRETS)
+# Variables de entorno (secretos)
 .env
+.env.*
+!.env.example
 backend/.env
 *.env.local
 
@@ -36,12 +39,18 @@ backend/.env
 *.swp
 *.swo
 
-# OS
+# Sistema operativo
 .DS_Store
 Thumbs.db
+
 # Frontend - dependencias de Node.js
 frontend/node_modules/
 
-# Variables de entorno adicionales
-.env.*
-!.env.example
+# Next.js - archivos generados
+frontend/.next/
+frontend/out/
+
+# Archivos de registro
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
