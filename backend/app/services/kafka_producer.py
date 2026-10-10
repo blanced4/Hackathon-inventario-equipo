@@ -88,3 +88,48 @@ async def publish(event_type: str, data: dict[str, Any], key: str) -> None:
         logger.info("Evento publicado a %s: %s (key=%s)", settings.KAFKA_TOPIC_INVENTORY_EVENTS, event_type, key)
     except Exception as exc:
         logger.error("Error publicando evento %s: %s", event_type, exc)
+
+
+async def publish_dlq(original_event: dict[str, Any], topic: str, error: str) -> None:
+    """
+    Publica un evento que no se pudo procesar en inventory.dlq.
+    Nunca lanza excepción: el consumo del flujo principal no debe detenerse por un fallo aquí.
+    """
+    global _producer
+    if _producer is None:
+        try:
+            await start_producer()
+        except Exception:
+            pass
+    if _producer is None:
+        logger.error("Producer no disponible; no se pudo enviar al DLQ el evento de %s", topic)
+        return
+
+    key = str(original_event.get("key") or original_event.get("event_id") or "unknown")
+    dlq_message = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "event.dead_lettered",
+        "event_version": 1,
+        "occurred_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "inventory",
+        "key": key,
+        "data": {
+            "original_topic": topic,
+            "original_event_id": original_event.get("event_id"),
+            "original_event_type": original_event.get("event_type"),
+            "error": str(error)[:1000],
+            "original_event": original_event,
+        },
+    }
+    try:
+        await _producer.send_and_wait(
+            settings.KAFKA_TOPIC_DLQ,
+            value=dlq_message,
+            key=key,
+        )
+        logger.warning(
+            "Evento enviado a DLQ %s: original_type=%s error=%s",
+            settings.KAFKA_TOPIC_DLQ, original_event.get("event_type"), str(error)[:200],
+        )
+    except Exception as exc:
+        logger.error("Error publicando al DLQ: %s", exc)

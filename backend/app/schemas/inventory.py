@@ -115,6 +115,15 @@ class ResolveReceiptRequest(BaseModel):
     location_id: Optional[int] = None
 
 
+# ── Scan Resolve (Escáner de Piso) ───────────────────────────────────────────
+class PartLookupResponse(BaseModel):
+    part_id: int
+    sku: Optional[str] = None
+    name: str
+    on_hand: int = 0
+    matched_by: str  # id | sku | name
+
+
 # ── Operations Requests ──────────────────────────────────────────────────────
 class IssueRequest(BaseModel):
     work_order_code: str

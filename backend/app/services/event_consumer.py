@@ -72,6 +72,49 @@ async def drain_catalog() -> int:
     return count
 
 
+async def _process_with_retries(msg) -> None:
+    """
+    Procesa un mensaje con reintentos. Si tras EVENT_MAX_RETRIES sigue fallando,
+    lo envía a inventory.dlq y continúa (nunca detiene el consumo).
+
+    Garantiza idempotencia: process_event ya deduplica por event_id, así que
+    reintentar o reprocesar un evento ya aplicado no cambia el estado.
+    """
+    # 1. Parseo del JSON. Si el payload está corrupto, va directo al DLQ.
+    try:
+        raw = json.loads(msg.value.decode("utf-8"))
+    except Exception as parse_err:
+        logger.error("Payload no parseable en %s offset %d: %s", msg.topic, msg.offset, parse_err)
+        await kafka_producer.publish_dlq(
+            {"event_id": None, "event_type": None, "raw": str(msg.value)[:500]},
+            msg.topic,
+            f"json_decode_error: {parse_err}",
+        )
+        return
+
+    # 2. Reintentos de procesamiento
+    last_error: Optional[Exception] = None
+    for attempt in range(1, settings.EVENT_MAX_RETRIES + 1):
+        try:
+            async with AsyncSessionLocal() as db:
+                await event_processor.process_event(raw, msg.topic, db)
+            return  # éxito
+        except Exception as err:
+            last_error = err
+            logger.warning(
+                "Intento %d/%d falló para evento %s en %s: %s",
+                attempt, settings.EVENT_MAX_RETRIES, raw.get("event_id"), msg.topic, err,
+            )
+            await asyncio.sleep(0.2 * attempt)  # backoff creciente
+
+    # 3. Agotados los reintentos → DLQ, sin detener el consumo
+    logger.error(
+        "Evento %s enviado a DLQ tras %d intentos. Último error: %s",
+        raw.get("event_id"), settings.EVENT_MAX_RETRIES, last_error,
+    )
+    await kafka_producer.publish_dlq(raw, msg.topic, str(last_error))
+
+
 async def consume_loop() -> None:
     """
     Loop continuo de consumo para los 4 tópicos del taller.
@@ -116,15 +159,10 @@ async def consume_loop() -> None:
             sorted_partitions = sorted(records.items(), key=lambda item: _topic_priority(item[0]))
             for tp, messages in sorted_partitions:
                 for msg in messages:
-                    try:
-                        raw = json.loads(msg.value.decode("utf-8"))
-                        async with AsyncSessionLocal() as db:
-                            await event_processor.process_event(raw, msg.topic, db)
-                        processed_count += 1
-                        if processed_count % 50 == 0:
-                            logger.info("Progreso de consumo: %d eventos procesados", processed_count)
-                    except Exception as err:
-                        logger.error("Error en tópico %s offset %d: %s", msg.topic, msg.offset, err)
+                    await _process_with_retries(msg)
+                    processed_count += 1
+                    if processed_count % 50 == 0:
+                        logger.info("Progreso de consumo: %d eventos procesados", processed_count)
                 await _consumer.commit()
 
     except asyncio.CancelledError:

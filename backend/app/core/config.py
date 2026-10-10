@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Tópico de salida oficial
     KAFKA_TOPIC_INVENTORY_EVENTS: str = "inventory.events"
 
+    # Tópico de errores (Dead Letter Queue) — regla obligatoria del contrato
+    KAFKA_TOPIC_DLQ: str = "inventory.dlq"
+
+    # Reintentos antes de enviar un evento al DLQ
+    EVENT_MAX_RETRIES: int = 3
+
     # ── Base de Datos (Supabase / PostgreSQL) ─────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 

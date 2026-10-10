@@ -32,6 +32,7 @@ from app.schemas.inventory import (
     LocationAvailability,
     MaterialLine,
     MovementResponse,
+    PartLookupResponse,
     ReorderSuggestionItem,
     ReorderSuggestionsResponse,
     ResolveReceiptRequest,
@@ -77,7 +78,8 @@ async def get_part_availability(
         )
     )
     total_reserved = int(res_q.scalar() or 0)
-    total_available = total_on_hand - total_reserved
+    # Regla del contrato: available = on_hand - reserved, nunca por debajo de cero
+    total_available = max(0, total_on_hand - total_reserved)
 
     # On hand agrupado por ubicación
     loc_stock_q = await db.execute(
@@ -122,6 +124,84 @@ async def get_part_availability(
         reserved=total_reserved,
         available=total_available,
         locations=locations_list,
+    )
+
+
+# ── 1b. GET /parts/lookup?code=... (Resolver etiqueta escaneada) ─────────────
+@router.get(
+    "/parts/lookup",
+    response_model=PartLookupResponse,
+    summary="Resolver una pieza desde un código escaneado (ID, SKU o nombre)",
+    tags=["scanner"],
+)
+async def lookup_part_by_code(
+    code: str = Query(..., description="Texto del código de barras/QR escaneado"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Busca una pieza a partir del texto escaneado del kit de etiquetas.
+
+    Soporta tres formatos:
+      - ``P-24`` o ``24``      → por part_id
+      - ``INSERTO-001``        → por SKU exacto (case-insensitive)
+      - ``TORNILLO 6X12``      → por nombre (coincidencia exacta o parcial)
+    """
+    raw = (code or "").strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="Código vacío")
+
+    part = None
+    matched_by = ""
+
+    # 1) Formato P-<id> o solo dígitos → part_id
+    import re
+    pid_match = re.fullmatch(r"[Pp]-?(\d+)", raw) or re.fullmatch(r"(\d+)", raw)
+    if pid_match:
+        pid = int(pid_match.group(1))
+        q = await db.execute(select(Part).where(Part.part_id == pid))
+        part = q.scalar_one_or_none()
+        if part:
+            matched_by = "id"
+
+    # 2) Por SKU exacto (case-insensitive)
+    if part is None:
+        q = await db.execute(select(Part).where(func.lower(Part.sku) == raw.lower()))
+        part = q.scalar_one_or_none()
+        if part:
+            matched_by = "sku"
+
+    # 3) Por nombre exacto (case-insensitive)
+    if part is None:
+        q = await db.execute(select(Part).where(func.lower(Part.name) == raw.lower()))
+        part = q.scalar_one_or_none()
+        if part:
+            matched_by = "name"
+
+    # 4) Por nombre parcial (contains)
+    if part is None:
+        q = await db.execute(
+            select(Part).where(Part.name.ilike(f"%{raw}%")).limit(1)
+        )
+        part = q.scalar_one_or_none()
+        if part:
+            matched_by = "name"
+
+    if part is None:
+        raise HTTPException(status_code=404, detail=f"No se encontró ninguna pieza para el código '{raw}'")
+
+    # Stock total on-hand
+    stock_q = await db.execute(
+        select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
+            InventoryMovement.part_id == part.part_id
+        )
+    )
+    total_on_hand = int(stock_q.scalar() or 0)
+
+    return PartLookupResponse(
+        part_id=part.part_id,
+        sku=part.sku,
+        name=part.name,
+        on_hand=total_on_hand,
+        matched_by=matched_by,
     )
 
 
@@ -393,6 +473,12 @@ async def get_unmatched_receipts(db: AsyncSession = Depends(get_db)):
     response_model=MovementResponse,
     summary="Salida de material para una orden",
 )
+@router.post(
+    "/operations/issue",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MovementResponse,
+    include_in_schema=False,
+)
 async def issue_part(req: IssueRequest, db: AsyncSession = Depends(get_db)):
     # Validar disponibilidad real en esa ubicación
     stk_q = await db.execute(
@@ -480,6 +566,12 @@ async def issue_part(req: IssueRequest, db: AsyncSession = Depends(get_db)):
     response_model=MovementResponse,
     summary="Transferencia entre ubicaciones",
 )
+@router.post(
+    "/operations/transfer",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MovementResponse,
+    include_in_schema=False,
+)
 async def transfer_part(req: TransferRequest, db: AsyncSession = Depends(get_db)):
     stock_q = await db.execute(
         select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
@@ -542,6 +634,12 @@ async def transfer_part(req: TransferRequest, db: AsyncSession = Depends(get_db)
     status_code=status.HTTP_201_CREATED,
     response_model=CountResponse,
     summary="Conteo cíclico con ajustes",
+)
+@router.post(
+    "/operations/count",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CountResponse,
+    include_in_schema=False,
 )
 async def cycle_count(req: CountRequest, db: AsyncSession = Depends(get_db)):
     if not req.reason.strip():
