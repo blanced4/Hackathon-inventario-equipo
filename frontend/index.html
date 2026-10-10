@@ -227,14 +227,13 @@
 
         <div class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl relative overflow-hidden">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-mono uppercase text-slate-400">Integridad de Libro Mayor</span>
+            <span class="text-xs font-mono uppercase text-slate-400">Libro Mayor</span>
             <i data-lucide="check-circle-2" class="h-4 w-4 text-emerald-400"></i>
           </div>
           <div class="mt-3 flex items-baseline gap-2">
-            <span class="text-3xl font-mono font-bold text-emerald-400">50 / 50</span>
-            <span class="text-xs text-emerald-400 font-mono">pts oficiales</span>
+            <span class="text-3xl font-mono font-bold text-emerald-400">Inmutable</span>
           </div>
-          <p class="mt-1 text-[11px] text-slate-500">Kardex 100% auditado y conmutado</p>
+          <p class="mt-1 text-[11px] text-slate-500">Saldos calculados desde movimientos auditados</p>
         </div>
       </div>
 
@@ -257,28 +256,28 @@
           <div id="quick-parts-list" class="space-y-2 mt-3"></div>
         </div>
 
-        <!-- Terminal de resumen -->
+        <!-- Capacidades del sistema -->
         <div class="bg-slate-900/40 border border-slate-800/80 p-5 rounded-xl flex flex-col justify-between">
           <div>
             <h3 class="text-sm font-mono font-bold uppercase text-emerald-400 flex items-center gap-2">
-              <i data-lucide="zap" class="h-4 w-4"></i> Monitor de Contrato Oficial
+              <i data-lucide="zap" class="h-4 w-4"></i> Capacidades del Servicio
             </h3>
             <div class="mt-3 space-y-3 font-mono text-xs">
               <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
                 <div class="text-slate-400 text-[11px]">Libro Mayor Inmutable</div>
-                <div class="text-emerald-400 font-bold mt-0.5">5/5 Escenarios Aprobados (25 pts)</div>
-                <div class="text-[10px] text-slate-500 mt-1">Idempotencia, salidas seguras, kardex y conteo.</div>
+                <div class="text-emerald-400 font-bold mt-0.5">Kardex por movimientos</div>
+                <div class="text-[10px] text-slate-500 mt-1">Idempotencia, salidas sin negativos, conteo cíclico.</div>
               </div>
               <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                <div class="text-slate-400 text-[11px]">Integración Taller Redpanda</div>
-                <div class="text-emerald-400 font-bold mt-0.5">9/9 Escenarios Aprobados (25 pts)</div>
-                <div class="text-[10px] text-slate-500 mt-1">Concurrencia, anulación, reemplazo y desorden.</div>
+                <div class="text-slate-400 text-[11px]">Integración Taller (Redpanda)</div>
+                <div class="text-emerald-400 font-bold mt-0.5">Eventos en tiempo real</div>
+                <div class="text-[10px] text-slate-500 mt-1">Reservas, faltantes, anulación, reemplazo y DLQ.</div>
               </div>
             </div>
           </div>
           <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
-            <span>Sistema 100% operativo</span>
-            <span class="text-cyan-400 font-bold">50.0 / 50 PTS</span>
+            <span>Estado del servicio</span>
+            <span id="overview-health" class="text-cyan-400 font-bold">Operativo</span>
           </div>
         </div>
       </div>
