@@ -8,6 +8,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- html5-qrcode: soporte QR + Code128 para escáner de piso -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -45,6 +47,55 @@
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
     .glow-cyan { box-shadow: 0 0 25px -5px rgba(0, 240, 255, 0.2); }
+
+    /* ── SCANNER MODAL ── */
+    #scanner-modal { transition: opacity 0.2s ease; }
+    #scanner-modal.hidden { display: none; }
+
+    .scanner-frame {
+      position: relative;
+      border: 2px solid #06b6d4;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 30px -5px rgba(6,182,212,0.4), inset 0 0 20px rgba(6,182,212,0.05);
+    }
+    .scanner-line {
+      position: absolute;
+      left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #06b6d4, transparent);
+      animation: scan-sweep 2s ease-in-out infinite;
+      z-index: 10;
+    }
+    @keyframes scan-sweep {
+      0%   { top: 5%; opacity: 0; }
+      10%  { opacity: 1; }
+      90%  { opacity: 1; }
+      100% { top: 95%; opacity: 0; }
+    }
+    .scanner-corner {
+      position: absolute;
+      width: 22px; height: 22px;
+      border-color: #22d3ee;
+      border-style: solid;
+    }
+    .scanner-corner.tl { top: 8px; left: 8px;  border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+    .scanner-corner.tr { top: 8px; right: 8px; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+    .scanner-corner.bl { bottom: 8px; left: 8px;  border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+    .scanner-corner.br { bottom: 8px; right: 8px; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+
+    .step-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 50%;
+      font-size: 11px; font-weight: 700; font-family: monospace;
+      border: 2px solid #334155; color: #64748b; background: #0f172a;
+      transition: all 0.3s;
+    }
+    .step-badge.active  { border-color: #06b6d4; color: #06b6d4; background: #083344; box-shadow: 0 0 10px rgba(6,182,212,0.4); }
+    .step-badge.done    { border-color: #10b981; color: #10b981; background: #052e16; }
+
+    #scanner-video-region video { width: 100% !important; height: auto !important; }
+    #scanner-video-region { min-height: 220px; }
   </style>
 </head>
 <body class="min-h-screen selection:bg-cyan-500/30 selection:text-cyan-200">
@@ -126,6 +177,9 @@
       </button>
       <button onclick="switchTab('gemini'); loadUnmatchedForAI();" id="tab-btn-gemini" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-cyan-400 hover:text-white border border-cyan-500/30 bg-cyan-950/30 font-bold shadow-sm shadow-cyan-500/20">
         <i data-lucide="sparkles" class="h-4 w-4 text-cyan-400 animate-pulse"></i> Copiloto Gemini AI
+      </button>
+      <button onclick="openScannerModal()" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-white border border-emerald-500/50 bg-emerald-950/40 font-bold shadow-sm shadow-emerald-500/20 hover:bg-emerald-900/50 transition">
+        📷 Escáner de Piso
       </button>
     </nav>
   </div>
@@ -525,6 +579,132 @@
       </div>
     </div>
   </main>
+
+  <!-- ══════════════════════════════════════════════════════════
+       MODAL: ESCÁNER DE PISO CON CÁMARA (html5-qrcode)
+  ══════════════════════════════════════════════════════════ -->
+  <div id="scanner-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4" style="background:rgba(9,13,22,0.92);backdrop-filter:blur(6px);">
+    <div class="relative w-full max-w-md bg-[#0f172a] border border-cyan-500/40 rounded-2xl shadow-2xl shadow-cyan-500/10 overflow-hidden">
+
+      <!-- Header del modal -->
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">📷</span>
+          <div>
+            <h2 class="font-mono font-bold text-white text-sm tracking-wide">ESCÁNER DE PISO</h2>
+            <p class="text-[10px] text-slate-400 font-mono">QR · Code128 · SKU · P-ID</p>
+          </div>
+        </div>
+        <button onclick="closeScannerModal()" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Indicador de pasos -->
+      <div class="flex items-center justify-center gap-3 px-5 py-3 border-b border-slate-800/60 bg-slate-950/40">
+        <div class="flex items-center gap-1.5">
+          <span id="step-badge-1" class="step-badge active">1</span>
+          <span id="step-label-1" class="text-[11px] font-mono text-cyan-400">Ubicación</span>
+        </div>
+        <div class="h-px w-6 bg-slate-700"></div>
+        <div class="flex items-center gap-1.5">
+          <span id="step-badge-2" class="step-badge">2</span>
+          <span id="step-label-2" class="text-[11px] font-mono text-slate-500">Pieza</span>
+        </div>
+        <div class="h-px w-6 bg-slate-700"></div>
+        <div class="flex items-center gap-1.5">
+          <span id="step-badge-3" class="step-badge">3</span>
+          <span id="step-label-3" class="text-[11px] font-mono text-slate-500">Confirmar</span>
+        </div>
+      </div>
+
+      <!-- Instrucción del paso actual -->
+      <div class="px-5 pt-4 pb-2">
+        <p id="scanner-instruction" class="text-xs font-mono text-cyan-300 text-center bg-cyan-950/30 border border-cyan-500/20 rounded-lg px-3 py-2">
+          Paso 1: Escanea la etiqueta del estante (ej. U-100)
+        </p>
+      </div>
+
+      <!-- Visor de cámara -->
+      <div class="px-5 pb-3">
+        <div class="scanner-frame" style="min-height:220px;">
+          <div class="scanner-line"></div>
+          <div class="scanner-corner tl"></div>
+          <div class="scanner-corner tr"></div>
+          <div class="scanner-corner bl"></div>
+          <div class="scanner-corner br"></div>
+          <div id="scanner-video-region" class="w-full"></div>
+        </div>
+      </div>
+
+      <!-- Resultados detectados -->
+      <div class="px-5 pb-3 space-y-2">
+        <!-- Resultado ubicación -->
+        <div id="scan-result-location" class="hidden flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 font-mono text-xs">
+          <span class="text-emerald-400 font-bold">✓ UBICACIÓN:</span>
+          <span id="scan-location-text" class="text-white font-bold"></span>
+        </div>
+        <!-- Resultado pieza -->
+        <div id="scan-result-part" class="hidden flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-950/60 border border-cyan-500/40 font-mono text-xs">
+          <span class="text-cyan-400 font-bold">✓ PIEZA:</span>
+          <span id="scan-part-text" class="text-white font-bold"></span>
+        </div>
+      </div>
+
+      <!-- Panel de confirmación (Paso 3) -->
+      <div id="scanner-confirm-panel" class="hidden px-5 pb-5">
+        <div class="bg-slate-950/80 border border-slate-700 rounded-xl p-4 font-mono text-xs space-y-3">
+          <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-1">
+            <span class="text-slate-400 uppercase tracking-wider text-[10px]">Resumen de Entrega</span>
+            <span class="text-emerald-400 font-bold text-[10px]">LISTO PARA CONFIRMAR</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-[11px]">
+            <div><span class="text-slate-500">Orden:</span><br><span id="confirm-wo" class="text-cyan-400 font-bold">—</span></div>
+            <div><span class="text-slate-500">Pieza:</span><br><span id="confirm-part" class="text-white font-bold">—</span></div>
+            <div><span class="text-slate-500">Ubicación:</span><br><span id="confirm-loc" class="text-white font-bold">—</span></div>
+            <div>
+              <span class="text-slate-500">Cantidad:</span><br>
+              <div class="flex items-center gap-2 mt-0.5">
+                <button onclick="scannerQty = Math.max(1, scannerQty-1); document.getElementById('confirm-qty').textContent=scannerQty" class="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold">−</button>
+                <span id="confirm-qty" class="text-white font-bold text-sm">1</span>
+                <button onclick="scannerQty++; document.getElementById('confirm-qty').textContent=scannerQty" class="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold">+</button>
+              </div>
+            </div>
+          </div>
+          <!-- Selector de orden -->
+          <div class="pt-1">
+            <label class="text-slate-500 text-[10px] uppercase">Orden de Trabajo:</label>
+            <select id="confirm-wo-select" class="w-full mt-1 bg-slate-900 border border-slate-700 px-2 py-1.5 rounded text-white font-mono text-xs focus:outline-none focus:border-cyan-500">
+            </select>
+          </div>
+        </div>
+
+        <!-- Mensaje de estado dentro del modal -->
+        <div id="scanner-confirm-msg" class="hidden mt-3 px-3 py-2 rounded-lg font-mono text-[11px] text-center"></div>
+
+        <button id="scanner-confirm-btn" onclick="confirmScannerIssue()" class="w-full mt-3 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-mono font-bold text-sm uppercase tracking-wider shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50">
+          ✓ Confirmar Entrega a Orden
+        </button>
+        <button onclick="scannerRestart()" class="w-full mt-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] font-mono transition">
+          ↩ Escanear de Nuevo
+        </button>
+      </div>
+
+      <!-- Nota de acceso desde celular -->
+      <div class="px-5 pb-4 pt-1">
+        <details class="text-[10px] font-mono text-slate-500 cursor-pointer">
+          <summary class="hover:text-slate-300 transition select-none">📱 ¿Cómo abrir desde el celular?</summary>
+          <div class="mt-2 p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1.5 text-slate-400">
+            <p>1. Asegúrate de que tu PC y tu celular estén en la <strong class="text-white">misma red WiFi</strong>.</p>
+            <p>2. En tu celular abre: <strong class="text-cyan-400" id="local-ip-hint">http://&lt;IP-de-tu-PC&gt;:8000/dashboard</strong></p>
+            <p>3. Para cámara en Android/iOS se requiere <strong class="text-white">HTTPS</strong>. Usa un túnel:<br>
+               <code class="text-amber-400">npx localtunnel --port 8000</code></p>
+            <p class="text-slate-500">O instala ngrok y corre: <code class="text-amber-400">ngrok http 8000</code></p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
 
   <script>
     const API_BASE = (window.location.port === "8000") ? window.location.origin : "http://localhost:8000";
@@ -1080,6 +1260,230 @@
       loadLedger(currentPartId);
       loadWorkOrder(currentOrderCode);
       loadShortagesAndReorders();
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // ESCÁNER DE PISO — html5-qrcode
+    // ══════════════════════════════════════════════════════════
+    let _scanner = null;
+    let _scanStep = 1;       // 1=ubicación, 2=pieza, 3=confirmar
+    let _scanLocationId = null;
+    let _scanPartId = null;
+    let _scanPartName = "";
+    let scannerQty = 1;
+
+    function openScannerModal() {
+      // Poblar selector de órdenes
+      const sel = document.getElementById("confirm-wo-select");
+      sel.innerHTML = QUICK_ORDERS.map(c => `<option value="${c}">${c}</option>`).join('');
+      if (currentOrderCode) sel.value = currentOrderCode;
+
+      document.getElementById("scanner-modal").classList.remove("hidden");
+      _scanStep = 1;
+      _scanLocationId = null;
+      _scanPartId = null;
+      scannerQty = 1;
+      // Limpiar resultados y mensajes de sesiones anteriores
+      document.getElementById("scan-result-location").classList.add("hidden");
+      document.getElementById("scan-result-part").classList.add("hidden");
+      const msg0 = document.getElementById("scanner-confirm-msg");
+      if (msg0) msg0.classList.add("hidden");
+      const btn0 = document.getElementById("scanner-confirm-btn");
+      if (btn0) { btn0.disabled = false; btn0.textContent = "✓ Confirmar Entrega a Orden"; }
+      _updateScannerUI();
+      _startCamera();
+    }
+
+    function closeScannerModal() {
+      _stopCamera();
+      document.getElementById("scanner-modal").classList.add("hidden");
+    }
+
+    function scannerRestart() {
+      _scanStep = 1;
+      _scanLocationId = null;
+      _scanPartId = null;
+      scannerQty = 1;
+      // Limpiar resultados y mensajes previos
+      document.getElementById("scan-result-location").classList.add("hidden");
+      document.getElementById("scan-result-part").classList.add("hidden");
+      const msg = document.getElementById("scanner-confirm-msg");
+      if (msg) msg.classList.add("hidden");
+      const btn = document.getElementById("scanner-confirm-btn");
+      if (btn) { btn.disabled = false; btn.textContent = "✓ Confirmar Entrega a Orden"; }
+      _updateScannerUI();
+      _startCamera();
+    }
+
+    function _updateScannerUI() {
+      // Badges de pasos
+      [1,2,3].forEach(n => {
+        const badge = document.getElementById(`step-badge-${n}`);
+        const label = document.getElementById(`step-label-${n}`);
+        badge.className = "step-badge " + (n < _scanStep ? "done" : n === _scanStep ? "active" : "");
+        if (n < _scanStep) badge.textContent = "✓";
+        else badge.textContent = String(n);
+
+        const colors = { 1: "text-cyan-400", 2: "text-cyan-400", 3: "text-cyan-400" };
+        label.className = `text-[11px] font-mono ${n <= _scanStep ? colors[n] : "text-slate-500"}`;
+      });
+
+      const instructions = {
+        1: "Paso 1: Escanea la etiqueta del estante (ej. U-100)",
+        2: "Paso 2: Escanea la etiqueta de la pieza (ej. P-22 o SKU FLECHA-004)",
+        3: "Paso 3: Revisa y confirma la entrega",
+      };
+      document.getElementById("scanner-instruction").textContent = instructions[_scanStep] || "";
+
+      // Mostrar/ocultar panel de confirmación y cámara
+      const confirmPanel = document.getElementById("scanner-confirm-panel");
+      if (_scanStep === 3) {
+        confirmPanel.classList.remove("hidden");
+        _stopCamera();
+        // Rellenar resumen
+        const sel = document.getElementById("confirm-wo-select");
+        document.getElementById("confirm-wo").textContent = sel.value;
+        document.getElementById("confirm-part").textContent = _scanPartName || `ID #${_scanPartId}`;
+        document.getElementById("confirm-loc").textContent = `Bahía #${_scanLocationId}`;
+        document.getElementById("confirm-qty").textContent = String(scannerQty);
+      } else {
+        confirmPanel.classList.add("hidden");
+      }
+    }
+
+    function _startCamera() {
+      _stopCamera();
+      const regionEl = document.getElementById("scanner-video-region");
+      regionEl.innerHTML = "";
+
+      _scanner = new Html5Qrcode("scanner-video-region", { verbose: false });
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 260, height: 160 },
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.UPC_A,
+        ],
+      };
+
+      _scanner.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText) => _onScanSuccess(decodedText),
+        () => {} // ignorar errores de frame
+      ).catch(err => {
+        document.getElementById("scanner-video-region").innerHTML =
+          `<div class="p-6 text-center text-red-400 font-mono text-xs">
+            ⚠ Sin acceso a cámara.<br>
+            <span class="text-slate-400">Requiere HTTPS o localhost.<br>Usa ngrok/localtunnel desde el celular.</span>
+           </div>`;
+      });
+    }
+
+    function _stopCamera() {
+      if (_scanner) {
+        _scanner.stop().catch(() => {});
+        _scanner = null;
+      }
+    }
+
+    function _vibrate() {
+      if (navigator.vibrate) navigator.vibrate(120);
+    }
+
+    async function _onScanSuccess(raw) {
+      const text = raw.trim();
+
+      if (_scanStep === 1) {
+        // Detectar U-### (ubicación)
+        const locMatch = text.match(/^[Uu]-?(\d+)$/);
+        if (locMatch) {
+          _scanLocationId = parseInt(locMatch[1], 10);
+          _vibrate();
+          document.getElementById("scan-result-location").classList.remove("hidden");
+          document.getElementById("scan-location-text").textContent = `Bahía #${_scanLocationId} (${text})`;
+          _scanStep = 2;
+          _updateScannerUI();
+          return;
+        }
+        showAlert("error", `Código no reconocido como ubicación: "${text}". Esperado: U-100`);
+        return;
+      }
+
+      if (_scanStep === 2) {
+        // Resolver pieza vía backend: soporta P-24, SKU (INSERTO-001) o nombre (TORNILLO 6X12)
+        try {
+          const res = await fetch(`${API_BASE}/parts/lookup?code=${encodeURIComponent(text)}`);
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.detail || `Pieza no reconocida: "${text}"`);
+          }
+          const data = await res.json();
+          _scanPartId = data.part_id;
+          _scanPartName = data.name || `ID #${data.part_id}`;
+          _vibrate();
+          document.getElementById("scan-result-part").classList.remove("hidden");
+          document.getElementById("scan-part-text").textContent =
+            `${_scanPartName} (${data.sku || 'S/SKU'}) · Stock: ${data.on_hand}u`;
+          _scanStep = 3;
+          _updateScannerUI();
+        } catch(err) {
+          showAlert("error", err.message);
+        }
+        return;
+      }
+    }
+
+    async function confirmScannerIssue() {
+      const woCode = document.getElementById("confirm-wo-select").value;
+      const btn = document.getElementById("scanner-confirm-btn");
+      const msg = document.getElementById("scanner-confirm-msg");
+
+      const body = {
+        work_order_code: woCode,
+        part_id: _scanPartId,
+        location_id: _scanLocationId,
+        quantity: scannerQty,
+        issued_by: "Operador-Scanner",
+      };
+
+      // Feedback dentro del modal
+      btn.disabled = true;
+      btn.textContent = "Procesando...";
+      msg.className = "mt-3 px-3 py-2 rounded-lg font-mono text-[11px] text-center bg-slate-800 text-slate-300 border border-slate-700";
+      msg.textContent = "Registrando salida en Kardex...";
+      msg.classList.remove("hidden");
+
+      try {
+        const res = await fetch(`${API_BASE}/operations/issue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        // Éxito: mostrar confirmación dentro del modal y cerrar tras 1.2s
+        msg.className = "mt-3 px-3 py-2 rounded-lg font-mono text-[11px] text-center bg-emerald-950/70 text-emerald-300 border border-emerald-500/40";
+        msg.textContent = `✓ Entregadas ${scannerQty} u. de "${_scanPartName}" a ${woCode}`;
+        _vibrate();
+        refreshAll();
+        setTimeout(() => {
+          closeScannerModal();
+          showAlert("success", `✓ Salida registrada: ${scannerQty} u. de "${_scanPartName}" a orden ${woCode} desde Bahía #${_scanLocationId}`);
+        }, 1200);
+      } catch (err) {
+        // Error: mostrar dentro del modal, NO cerrar, permitir reintento
+        msg.className = "mt-3 px-3 py-2 rounded-lg font-mono text-[11px] text-center bg-red-950/70 text-red-300 border border-red-500/40";
+        msg.textContent = `✗ ${err.message}`;
+        btn.disabled = false;
+        btn.textContent = "✓ Reintentar Confirmación";
+      }
     }
 
     // Inicialización al cargar la página

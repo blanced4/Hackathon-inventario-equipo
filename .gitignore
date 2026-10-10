@@ -54,3 +54,7 @@ frontend/out/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Binarios de túnel (no versionar, pesan demasiado)
+cloudflared.exe
+*.exe
