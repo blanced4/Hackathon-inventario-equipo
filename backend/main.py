@@ -11,15 +11,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.api.inventory import router as inventory_router
 
 
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestiona recursos que requieren ciclo de vida (Kafka, DB pool, etc.)."""
-    # TODO: inicializar consumer Kafka y pool de base de datos
     yield
-    # TODO: cerrar consumer Kafka y pool de base de datos
 
 
 # ── Instancia de la aplicación ────────────────────────────────────────────────
@@ -48,9 +47,8 @@ app.add_middleware(
 )
 
 
-# ── Routers ───────────────────────────────────────────────────────────────────
-# from app.api import stock, parts, locations   # se importarán cuando existan
-# app.include_router(stock.router, prefix="/api/v1/stock", tags=["stock"])
+# ── Routers Oficiales (OpenAPI) ───────────────────────────────────────────────
+app.include_router(inventory_router)
 
 
 # ── Endpoints base ────────────────────────────────────────────────────────────

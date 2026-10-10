@@ -1,1 +1,23 @@
-# Models package — modelos SQLAlchemy y Pydantic schemas
+from app.models.models import (
+    ProcessedEvent,
+    Part,
+    Location,
+    BomLine,
+    WorkOrder,
+    InventoryMovement,
+    Reservation,
+    Shortage,
+    UnmatchedReceipt,
+)
+
+__all__ = [
+    "ProcessedEvent",
+    "Part",
+    "Location",
+    "BomLine",
+    "WorkOrder",
+    "InventoryMovement",
+    "Reservation",
+    "Shortage",
+    "UnmatchedReceipt",
+]
