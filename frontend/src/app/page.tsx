@@ -36,7 +36,6 @@ const QUICK_PARTS = [
   { id: 22, sku: "FLECHA-004", name: "Flecha KESSLER DMS080" },
   { id: 95, sku: "SEPARADOR2-004", name: "Separador de Rodamientos 004" },
   { id: 101, sku: "LEVA-004", name: "Leva Actuadora Neumática" },
-  { id: 102, sku: "BEAR-7005-AC", name: "Rodamiento Angular 7005-AC (24k RPM)" },
   { id: 103, sku: "ROTOR-HS-01", name: "Rotor Balanceado Alta Velocidad" },
 ];
 
@@ -510,7 +509,14 @@ export default function SpindleOSDashboard() {
                 <div className="lg:col-span-1 space-y-4">
                   <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
                     <span className="text-xs font-mono uppercase text-slate-400">Pieza Seleccionada</span>
-                    <h2 className="text-lg font-bold font-mono text-white mt-1">ID #{availability.part_id}</h2>
+                    <h2 className="text-lg font-bold font-mono text-white mt-1">
+                      {availability.name ?? `ID #${availability.part_id}`}
+                    </h2>
+                    {availability.sku && (
+                      <p className="text-xs font-mono text-slate-400 mt-0.5">
+                        SKU: {availability.sku} · ID #{availability.part_id}
+                      </p>
+                    )}
 
                     <div className="mt-6 space-y-3 font-mono">
                       <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800/80">

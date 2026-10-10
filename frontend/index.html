@@ -249,6 +249,7 @@
         <div class="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
           <span class="text-xs font-mono uppercase text-slate-400">Pieza Seleccionada</span>
           <h2 id="avail-title" class="text-lg font-bold font-mono text-white mt-1">ID #22</h2>
+          <p id="avail-subtitle" class="text-xs font-mono text-slate-400 mt-0.5"></p>
           <div class="mt-6 space-y-3 font-mono">
             <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800/80">
               <span class="text-slate-400 text-xs">Stock Físico (On Hand):</span>
@@ -532,7 +533,6 @@
       { id: 22, sku: "FLECHA-004", name: "Flecha KESSLER DMS080" },
       { id: 95, sku: "SEPARADOR2-004", name: "Separador de Rodamientos 004" },
       { id: 101, sku: "LEVA-004", name: "Leva Actuadora Neumática" },
-      { id: 102, sku: "BEAR-7005-AC", name: "Rodamiento Angular 7005-AC" },
       { id: 103, sku: "ROTOR-HS-01", name: "Rotor Balanceado 24k RPM" },
     ];
 
@@ -596,6 +596,13 @@
         const res = await fetch(`${API_BASE}/parts/${currentPartId}/availability`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        // Mostrar nombre y SKU si están disponibles
+        const titleEl = document.getElementById("avail-title");
+        const subtitleEl = document.getElementById("avail-subtitle");
+        titleEl.textContent = data.name ?? `ID #${data.part_id}`;
+        if (subtitleEl) {
+          subtitleEl.textContent = data.sku ? `SKU: ${data.sku} · ID #${data.part_id}` : `ID #${data.part_id}`;
+        }
         document.getElementById("avail-onhand").textContent = data.on_hand;
         document.getElementById("avail-reserved").textContent = data.reserved;
         document.getElementById("avail-available").textContent = data.available;

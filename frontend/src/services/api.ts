@@ -3,6 +3,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export interface PartAvailability {
   part_id: number;
+  name?: string | null;
+  sku?: string | null;
   on_hand: number;
   reserved: number;
   available: number;
