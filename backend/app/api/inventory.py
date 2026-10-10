@@ -3,6 +3,7 @@ Rutas oficiales del API REST del Servicio de Inventario.
 Cumplen al 100% con contract/openapi.yaml y la base de datos Supabase.
 """
 
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, desc, func, or_, select
@@ -154,7 +155,7 @@ async def get_part_ledger(
                 part_id=m.part_id,
                 location_id=m.location_id,
                 quantity=m.delta,
-                occurred_at=m.created_at,
+                occurred_at=m.created_at or datetime.now(timezone.utc),
                 reference=m.reference_id,
                 balance=running_balance,
             )

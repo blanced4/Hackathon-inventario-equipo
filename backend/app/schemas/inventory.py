@@ -32,7 +32,7 @@ class MovementResponse(BaseModel):
     part_id: int
     location_id: int
     quantity: int
-    occurred_at: datetime
+    occurred_at: Optional[datetime] = None
     reference: Optional[str] = None
 
 
