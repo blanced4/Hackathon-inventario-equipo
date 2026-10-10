@@ -39,3 +39,9 @@ backend/.env
 # OS
 .DS_Store
 Thumbs.db
+# Frontend - dependencias de Node.js
+frontend/node_modules/
+
+# Variables de entorno adicionales
+.env.*
+!.env.example
