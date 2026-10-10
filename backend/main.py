@@ -14,11 +14,26 @@ from app.core.config import settings
 from app.api.inventory import router as inventory_router
 
 
+import asyncio
+import logging
+from app.services.event_consumer import start_consumer, stop_consumer
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
+)
+logger = logging.getLogger("main")
+
+
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestiona recursos que requieren ciclo de vida (Kafka, DB pool, etc.)."""
+    logger.info("Iniciando background consumer en lifespan...")
+    consumer_task = asyncio.create_task(start_consumer(), name="kafka-consumer-task")
     yield
+    logger.info("Deteniendo background consumer en shutdown...")
+    await stop_consumer()
 
 
 # ── Instancia de la aplicación ────────────────────────────────────────────────
@@ -51,6 +66,14 @@ app.add_middleware(
 app.include_router(inventory_router)
 
 
+from fastapi.responses import FileResponse, HTMLResponse
+import os
+
+DASHBOARD_HTML_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+)
+
+
 # ── Endpoints base ────────────────────────────────────────────────────────────
 @app.get("/health", tags=["ops"], summary="Health check")
 async def health_check():
@@ -60,3 +83,13 @@ async def health_check():
         "service": "inventory",
         "env": settings.APP_ENV,
     }
+
+
+@app.get("/", tags=["ui"], include_in_schema=False)
+@app.get("/dashboard", tags=["ui"], summary="Panel de Control Industrial (Dashboard)")
+async def get_dashboard():
+    """Sirve la interfaz web Cyber-Industrial Kraftwerk SpindleOS."""
+    if os.path.exists(DASHBOARD_HTML_PATH):
+        return FileResponse(DASHBOARD_HTML_PATH, media_type="text/html")
+    return HTMLResponse("<h1>Dashboard no encontrado</h1>", status_code=404)
+

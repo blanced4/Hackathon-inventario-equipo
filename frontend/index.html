@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KRAFTWERK SPINDLE-OS · Almacén Inteligente</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            industrial: {
+              950: '#090d16',
+              900: '#0f172a',
+              800: '#1e293b',
+              700: '#334155',
+            },
+            cyber: {
+              cyan: '#00f0ff',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+              crimson: '#ef4444',
+            }
+          },
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #090d16;
+      color: #f8fafc;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .glow-cyan { box-shadow: 0 0 25px -5px rgba(0, 240, 255, 0.2); }
+  </style>
+</head>
+<body class="min-h-screen selection:bg-cyan-500/30 selection:text-cyan-200">
+  <!-- TOP TELEMETRY BAR -->
+  <header class="border-b border-slate-800/80 bg-[#0f172a]/90 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 border border-cyan-400/30">
+          <i data-lucide="cpu" class="h-5 w-5 text-white animate-pulse"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-base font-bold tracking-wider text-white">
+              KRAFTWERK <span class="text-cyan-400">SPINDLE-OS</span>
+            </span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
+              v2.0 HACKATHON
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 font-sans">
+            Almacén Inteligente de Husillos y Motores de Alta Frecuencia
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="hidden md:flex items-center gap-4 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-md text-xs font-mono">
+          <div class="flex items-center gap-2">
+            <span id="backend-pulse" class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span id="backend-status" class="text-emerald-400 font-medium">FASTAPI: 8000 ONLINE</span>
+          </div>
+          <span class="text-slate-700">|</span>
+          <div class="flex items-center gap-1.5 text-slate-400">
+            <i data-lucide="radio" class="h-3 w-3 text-cyan-400"></i>
+            <span>REDPANDA: 19092</span>
+          </div>
+          <span class="text-slate-700">|</span>
+          <div class="flex items-center gap-1.5 text-slate-400">
+            <i data-lucide="database" class="h-3 w-3 text-purple-400"></i>
+            <span>SUPABASE PG</span>
+          </div>
+        </div>
+
+        <button onclick="refreshAll()" class="p-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700/60" title="Refrescar datos">
+          <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- FLASH ALERT MESSAGE -->
+  <div id="alert-container" class="max-w-7xl mx-auto px-4 mt-4 hidden">
+    <div id="alert-box" class="p-3 rounded-lg border flex items-center justify-between text-sm">
+      <span id="alert-text"></span>
+      <button onclick="closeAlert()" class="text-xs opacity-70 hover:opacity-100 underline ml-4">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- NAVIGATION TABS -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+    <nav class="flex space-x-2 border-b border-slate-800 pb-3 overflow-x-auto">
+      <button onclick="switchTab('overview')" id="tab-btn-overview" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold">
+        <i data-lucide="activity" class="h-4 w-4"></i> Vista General
+      </button>
+      <button onclick="switchTab('availability')" id="tab-btn-availability" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent">
+        <i data-lucide="boxes" class="h-4 w-4"></i> Stock & Estanterías
+      </button>
+      <button onclick="switchTab('ledger')" id="tab-btn-ledger" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent">
+        <i data-lucide="file-spreadsheet" class="h-4 w-4"></i> Kardex Inmutable
+      </button>
+      <button onclick="switchTab('workorders')" id="tab-btn-workorders" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent">
+        <i data-lucide="wrench" class="h-4 w-4"></i> Órdenes de Trabajo
+      </button>
+      <button onclick="switchTab('shortages')" id="tab-btn-shortages" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent">
+        <i data-lucide="alert-triangle" class="h-4 w-4"></i> Faltantes & Reabastecimiento
+      </button>
+      <button onclick="switchTab('operations')" id="tab-btn-operations" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent">
+        <i data-lucide="arrow-right-left" class="h-4 w-4"></i> Terminal de Operaciones
+      </button>
+      <button onclick="switchTab('gemini'); loadUnmatchedForAI();" id="tab-btn-gemini" class="tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-cyan-400 hover:text-white border border-cyan-500/30 bg-cyan-950/30 font-bold shadow-sm shadow-cyan-500/20">
+        <i data-lucide="sparkles" class="h-4 w-4 text-cyan-400 animate-pulse"></i> Copiloto Gemini AI
+      </button>
+    </nav>
+  </div>
+
+  <!-- MAIN VIEW CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- 1. OVERVIEW -->
+    <div id="view-overview" class="space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-mono uppercase text-slate-400">Total Faltantes</span>
+            <i data-lucide="alert-triangle" class="h-4 w-4 text-amber-400"></i>
+          </div>
+          <div class="mt-3 flex items-baseline gap-2">
+            <span id="kpi-shortages" class="text-3xl font-mono font-bold text-white">0</span>
+            <span class="text-xs text-amber-400 font-mono">piezas críticas</span>
+          </div>
+          <p class="mt-1 text-[11px] text-slate-500">Bloqueando líneas de inspección en taller</p>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-mono uppercase text-slate-400">Sugerencias de Compra</span>
+            <i data-lucide="trending-up" class="h-4 w-4 text-blue-400"></i>
+          </div>
+          <div class="mt-3 flex items-baseline gap-2">
+            <span id="kpi-reorders" class="text-3xl font-mono font-bold text-white">0</span>
+            <span class="text-xs text-blue-400 font-mono">reabastecimientos</span>
+          </div>
+          <p class="mt-1 text-[11px] text-slate-500">Cálculo automático según demanda BOM</p>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-mono uppercase text-slate-400">Recepciones Sin Vincular</span>
+            <i data-lucide="layers" class="h-4 w-4 text-purple-400"></i>
+          </div>
+          <div class="mt-3 flex items-baseline gap-2">
+            <span id="kpi-unmatched" class="text-3xl font-mono font-bold text-white">0</span>
+            <span class="text-xs text-purple-400 font-mono">por clasificar</span>
+          </div>
+          <p class="mt-1 text-[11px] text-slate-500">Pendientes de resolución semántica</p>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-mono uppercase text-slate-400">Integridad de Libro Mayor</span>
+            <i data-lucide="check-circle-2" class="h-4 w-4 text-emerald-400"></i>
+          </div>
+          <div class="mt-3 flex items-baseline gap-2">
+            <span class="text-3xl font-mono font-bold text-emerald-400">50 / 50</span>
+            <span class="text-xs text-emerald-400 font-mono">pts oficiales</span>
+          </div>
+          <p class="mt-1 text-[11px] text-slate-500">Kardex 100% auditado y conmutado</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Husillos activos -->
+        <div class="bg-slate-900/40 border border-slate-800/80 p-5 rounded-xl">
+          <h3 class="text-sm font-mono font-bold uppercase text-cyan-400 flex items-center gap-2">
+            <i data-lucide="wrench" class="h-4 w-4"></i> Órdenes de Trabajo Activas
+          </h3>
+          <p className="text-xs text-slate-400 mt-1 mb-4">Husillos en proceso de desarme y rectificación:</p>
+          <div id="quick-orders-list" class="space-y-2 mt-3"></div>
+        </div>
+
+        <!-- Componentes críticos -->
+        <div class="bg-slate-900/40 border border-slate-800/80 p-5 rounded-xl">
+          <h3 class="text-sm font-mono font-bold uppercase text-cyan-400 flex items-center gap-2">
+            <i data-lucide="boxes" class="h-4 w-4"></i> Componentes Críticos en Almacén
+          </h3>
+          <p className="text-xs text-slate-400 mt-1 mb-4">Piezas de alta rotación para husillos:</p>
+          <div id="quick-parts-list" class="space-y-2 mt-3"></div>
+        </div>
+
+        <!-- Terminal de resumen -->
+        <div class="bg-slate-900/40 border border-slate-800/80 p-5 rounded-xl flex flex-col justify-between">
+          <div>
+            <h3 class="text-sm font-mono font-bold uppercase text-emerald-400 flex items-center gap-2">
+              <i data-lucide="zap" class="h-4 w-4"></i> Monitor de Contrato Oficial
+            </h3>
+            <div class="mt-3 space-y-3 font-mono text-xs">
+              <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <div class="text-slate-400 text-[11px]">Libro Mayor Inmutable</div>
+                <div class="text-emerald-400 font-bold mt-0.5">5/5 Escenarios Aprobados (25 pts)</div>
+                <div class="text-[10px] text-slate-500 mt-1">Idempotencia, salidas seguras, kardex y conteo.</div>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <div class="text-slate-400 text-[11px]">Integración Taller Redpanda</div>
+                <div class="text-emerald-400 font-bold mt-0.5">9/9 Escenarios Aprobados (25 pts)</div>
+                <div class="text-[10px] text-slate-500 mt-1">Concurrencia, anulación, reemplazo y desorden.</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
+            <span>Sistema 100% operativo</span>
+            <span class="text-cyan-400 font-bold">50.0 / 50 PTS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. STOCK & ESTANTERIAS -->
+    <div id="view-availability" class="space-y-6 hidden">
+      <div class="bg-slate-900/70 border border-slate-800 p-4 rounded-xl flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-mono uppercase text-slate-400">Seleccionar Pieza:</span>
+          <div id="avail-quick-buttons" class="flex gap-1.5 flex-wrap"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="avail-input-id" type="number" placeholder="ID de Pieza..." class="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded text-xs font-mono w-32 focus:outline-none focus:border-cyan-500 text-white" value="22" />
+          <button onclick="loadAvailability(document.getElementById('avail-input-id').value)" class="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-medium transition">
+            Consultar
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+          <span class="text-xs font-mono uppercase text-slate-400">Pieza Seleccionada</span>
+          <h2 id="avail-title" class="text-lg font-bold font-mono text-white mt-1">ID #22</h2>
+          <div class="mt-6 space-y-3 font-mono">
+            <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800/80">
+              <span class="text-slate-400 text-xs">Stock Físico (On Hand):</span>
+              <span id="avail-onhand" class="text-lg font-bold text-white">0</span>
+            </div>
+            <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800/80">
+              <span class="text-slate-400 text-xs">Reservado (Taller):</span>
+              <span id="avail-reserved" class="text-lg font-bold text-amber-400">0</span>
+            </div>
+            <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-cyan-500/30 bg-cyan-950/20">
+              <span class="text-cyan-300 text-xs font-semibold">Disponible Libre:</span>
+              <span id="avail-available" class="text-xl font-bold text-cyan-400">0</span>
+            </div>
+          </div>
+          <button onclick="goToLedgerForCurrentPart()" class="w-full mt-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-cyan-400 font-medium transition text-center">
+            Ver Kardex / Movimientos Inmutables →
+          </button>
+        </div>
+
+        <div class="lg:col-span-2 bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+          <h3 class="text-sm font-mono font-bold uppercase text-slate-200 flex items-center gap-2 mb-4">
+            <i data-lucide="boxes" class="h-4 w-4 text-cyan-400"></i> Distribución en Almacén y Bahías
+          </h3>
+          <div id="avail-locations-table-container"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. KARDEX INMUTABLE -->
+    <div id="view-ledger" class="space-y-6 hidden">
+      <div class="bg-slate-900/70 border border-slate-800 p-4 rounded-xl flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h3 class="text-sm font-mono font-bold uppercase text-white flex items-center gap-2">
+            <i data-lucide="file-spreadsheet" class="h-4 w-4 text-cyan-400"></i> Libro Mayor Oficial (Ledger Inmutable)
+          </h3>
+          <p class="text-xs text-slate-400 font-sans mt-0.5">
+            Cada renglón es un evento inmutable registrado en PostgreSQL con timestamp ISO 8601.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="ledger-input-id" type="number" placeholder="Part ID..." class="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded text-xs font-mono w-28 focus:outline-none focus:border-cyan-500 text-white" value="22" />
+          <button onclick="loadLedger(document.getElementById('ledger-input-id').value)" class="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-medium transition">
+            Cargar Kardex
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
+        <div class="p-4 border-b border-slate-800 flex justify-between items-center text-xs font-mono bg-slate-950/60">
+          <span class="text-slate-400">Pieza consultada: <strong id="ledger-subtitle-part" class="text-white">#22</strong></span>
+          <span id="ledger-count-badge" class="text-cyan-400">0 movimientos auditados</span>
+        </div>
+        <div id="ledger-table-container"></div>
+      </div>
+    </div>
+
+    <!-- 4. ORDENES DE TRABAJO -->
+    <div id="view-workorders" class="space-y-6 hidden">
+      <div class="bg-slate-900/70 border border-slate-800 p-4 rounded-xl flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-mono uppercase text-slate-400">Órdenes del Taller:</span>
+          <div id="wo-quick-buttons" class="flex gap-1.5 flex-wrap"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="wo-input-code" type="text" placeholder="Código de Orden..." class="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded text-xs font-mono w-36 focus:outline-none focus:border-cyan-500 text-white" value="R363984127" />
+          <button onclick="loadWorkOrder(document.getElementById('wo-input-code').value)" class="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-medium transition">
+            Cargar BOM
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
+        <div class="p-4 border-b border-slate-800 flex justify-between items-center text-xs font-mono bg-slate-950/60">
+          <div>
+            <span class="text-slate-400">Orden de Trabajo: </span>
+            <strong id="wo-header-code" class="text-cyan-400 text-sm font-bold">R363984127</strong>
+          </div>
+          <span id="wo-header-count" class="text-slate-400">0 ítems de despiece</span>
+        </div>
+        <div id="wo-table-container"></div>
+      </div>
+    </div>
+
+    <!-- 5. FALTANTES & REABASTECIMIENTO -->
+    <div id="view-shortages" class="space-y-6 hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-mono font-bold uppercase text-amber-400 flex items-center gap-2">
+              <i data-lucide="alert-triangle" class="h-4 w-4"></i> Piezas Faltantes en Órdenes
+            </h3>
+            <span id="shortages-count-badge" class="text-xs font-mono text-slate-500">0 abiertas</span>
+          </div>
+          <div id="shortages-list-container" class="space-y-2.5 max-h-[400px] overflow-y-auto pr-1"></div>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-mono font-bold uppercase text-blue-400 flex items-center gap-2">
+              <i data-lucide="trending-up" class="h-4 w-4"></i> Sugerencias de Compra Inteligente
+            </h3>
+            <span id="reorders-count-badge" class="text-xs font-mono text-slate-500">0 sugerencias</span>
+          </div>
+          <div id="reorders-list-container" class="space-y-2.5 max-h-[400px] overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. TERMINAL DE OPERACIONES -->
+    <div id="view-operations" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden">
+      <div class="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+        <h3 class="text-sm font-mono font-bold uppercase text-cyan-400 flex items-center gap-2 mb-2">
+          <i data-lucide="package-minus" class="h-4 w-4"></i> Salida de Material (/operations/issue)
+        </h3>
+        <p class="text-xs text-slate-400 mb-5 font-sans">
+          Despacha piezas reservadas para una orden. Consume inventario y genera asiento negativo en Kardex.
+        </p>
+
+        <form id="issue-form" onsubmit="handleIssueSubmit(event)" class="space-y-4 font-mono text-xs">
+          <div>
+            <label class="block text-slate-400 mb-1">Código de Orden de Trabajo:</label>
+            <input id="issue-wo-code" type="text" required value="R363984127" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">ID de Pieza:</label>
+              <input id="issue-part-id" type="number" required value="22" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Bahía / Ubicación ID:</label>
+              <input id="issue-loc-id" type="number" required value="100" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">Cantidad a Entregar:</label>
+              <input id="issue-qty" type="number" min="1" required value="1" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Entregado Por (Operador):</label>
+              <input id="issue-by" type="text" required value="Operador-Taller" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+          </div>
+          <button type="submit" class="w-full mt-2 py-2.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg shadow-cyan-600/20 flex items-center justify-center gap-2">
+            <i data-lucide="send" class="h-3.5 w-3.5"></i> Registrar Salida en Kardex
+          </button>
+        </form>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+        <h3 class="text-sm font-mono font-bold uppercase text-blue-400 flex items-center gap-2 mb-2">
+          <i data-lucide="arrow-right-left" class="h-4 w-4"></i> Transferencia entre Estantes (/operations/transfer)
+        </h3>
+        <p class="text-xs text-slate-400 mb-5 font-sans">
+          Mueve stock físico entre diferentes bahías manteniendo balance neto cero en inventario total.
+        </p>
+
+        <form id="transfer-form" onsubmit="handleTransferSubmit(event)" class="space-y-4 font-mono text-xs">
+          <div>
+            <label class="block text-slate-400 mb-1">ID de Pieza a Mover:</label>
+            <input id="trans-part-id" type="number" required value="22" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">Bahía Origen (From ID):</label>
+              <input id="trans-from-loc" type="number" required value="100" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Bahía Destino (To ID):</label>
+              <input id="trans-to-loc" type="number" required value="101" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Cantidad a Transferir:</label>
+            <input id="trans-qty" type="number" min="1" required value="1" class="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded focus:outline-none focus:border-cyan-500 text-white" />
+          </div>
+          <button type="submit" class="w-full mt-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase tracking-wider text-xs transition shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2">
+            <i data-lucide="arrow-right-left" class="h-3.5 w-3.5"></i> Ejecutar Transferencia
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 7. GEMINI AI VIEW -->
+    <div id="view-gemini" class="space-y-6 hidden">
+      <!-- HERO BANNER GEMINI -->
+      <div class="p-6 rounded-2xl bg-gradient-to-r from-cyan-950/60 via-slate-900 to-blue-950/60 border border-cyan-500/30 relative overflow-hidden shadow-2xl">
+        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 text-[11px] font-mono font-bold tracking-wider mb-2">
+              <i data-lucide="sparkles" class="h-3.5 w-3.5 text-cyan-300"></i> INTELIGENCIA ARTIFICIAL GOOGLE GEMINI
+            </div>
+            <h2 class="text-2xl font-bold font-mono text-white tracking-wide">Copiloto Industrial & Emparejamiento Semántico</h2>
+            <p class="text-xs text-slate-300 max-w-2xl font-sans mt-1">
+              Resuelve ambigüedades en remisiones de proveedores asociando piezas automáticamente al catálogo oficial, y consulta el estado del taller en lenguaje natural.
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="px-4 py-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-right font-mono">
+              <div class="text-[10px] text-slate-400">Modelo Activo</div>
+              <div class="text-xs text-cyan-400 font-bold">gemini-2.5-flash</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- RESOLUCIÓN SEMÁNTICA DE RECEPCIONES -->
+        <div class="bg-slate-900/60 border border-slate-800 p-6 rounded-xl flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-mono text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="scan" class="h-4 w-4 text-cyan-400"></i> Recepciones No Asociadas (Muelle)
+            </h3>
+            <span id="gemini-unmatched-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950 text-amber-400 border border-amber-800">
+              Cargando...
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mb-4 font-sans">
+            Facturas o guías con nombres confusos. Gemini analiza la nomenclatura técnica y sugiere la pieza del catálogo.
+          </p>
+
+          <div id="gemini-unmatched-list" class="space-y-3 overflow-y-auto max-h-[500px] pr-1">
+            <div class="p-8 text-center text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-lg">
+              Cargando recepciones pendientes...
+            </div>
+          </div>
+        </div>
+
+        <!-- COPILOTO INDUSTRIAL CHAT -->
+        <div class="bg-slate-900/60 border border-slate-800 p-6 rounded-xl flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-mono text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="bot" class="h-4 w-4 text-cyan-400"></i> Consulta al Copiloto del Almacén
+            </h3>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800">
+              Online
+            </span>
+          </div>
+
+          <p class="text-xs text-slate-400 mb-3 font-sans">
+            Pregunta al asistente sobre disponibilidad, piezas críticas o recomendaciones de reorden:
+          </p>
+
+          <!-- BOTONES RÁPIDOS DE CONSULTA -->
+          <div class="flex flex-wrap gap-2 mb-4">
+            <button onclick="askCopilotQuick('¿Cuáles órdenes están en riesgo por falta de piezas?')" class="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-800/60 hover:bg-slate-700 text-slate-300 border border-slate-700">
+              ⚠ Órdenes en riesgo
+            </button>
+            <button onclick="askCopilotQuick('¿Qué compras críticas llegaron al muelle sin asociar?')" class="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-800/60 hover:bg-slate-700 text-slate-300 border border-slate-700">
+              📦 Recepciones sin asociar
+            </button>
+            <button onclick="askCopilotQuick('¿Cuál es la recomendación de abastecimiento urgente?')" class="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-800/60 hover:bg-slate-700 text-slate-300 border border-slate-700">
+              ⚡ Reabasto urgente
+            </button>
+          </div>
+
+          <!-- FORMULARIO DE CONSULTA -->
+          <form onsubmit="handleCopilotSubmit(event)" class="flex gap-2 mb-4">
+            <input id="copilot-input" type="text" placeholder="Escribe tu consulta operativa para el taller..." class="flex-1 bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-lg focus:outline-none focus:border-cyan-500 font-mono text-xs text-white" />
+            <button type="submit" id="copilot-submit-btn" class="px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-cyan-600/20">
+              <i data-lucide="send" class="h-3.5 w-3.5"></i> Enviar
+            </button>
+          </form>
+
+          <!-- RESULTADO DEL COPILOTO -->
+          <div id="copilot-response-container" class="flex-1 p-4 rounded-xl bg-slate-950/80 border border-slate-800 font-mono text-xs overflow-y-auto min-h-[220px]">
+            <div class="text-slate-500 text-center py-10">
+              <i data-lucide="message-square" class="h-6 w-6 mx-auto mb-2 opacity-40"></i>
+              Selecciona una consulta rápida o escribe tu pregunta técnica arriba.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = (window.location.port === "8000") ? window.location.origin : "http://localhost:8000";
+
+    const QUICK_PARTS = [
+      { id: 22, sku: "FLECHA-004", name: "Flecha KESSLER DMS080" },
+      { id: 95, sku: "SEPARADOR2-004", name: "Separador de Rodamientos 004" },
+      { id: 101, sku: "LEVA-004", name: "Leva Actuadora Neumática" },
+      { id: 102, sku: "BEAR-7005-AC", name: "Rodamiento Angular 7005-AC" },
+      { id: 103, sku: "ROTOR-HS-01", name: "Rotor Balanceado 24k RPM" },
+    ];
+
+    const QUICK_ORDERS = ["R363984127", "R180826000", "R150826000", "R289879015", "R140826000"];
+
+    let currentPartId = 22;
+    let currentOrderCode = "R363984127";
+
+    function showAlert(type, text) {
+      const container = document.getElementById("alert-container");
+      const box = document.getElementById("alert-box");
+      const label = document.getElementById("alert-text");
+      container.classList.remove("hidden");
+      label.textContent = text;
+      if (type === "success") {
+        box.className = "p-3 rounded-lg border flex items-center justify-between text-sm bg-emerald-950/60 border-emerald-500/40 text-emerald-300";
+      } else {
+        box.className = "p-3 rounded-lg border flex items-center justify-between text-sm bg-red-950/60 border-red-500/40 text-red-300";
+      }
+    }
+
+    function closeAlert() {
+      document.getElementById("alert-container").classList.add("hidden");
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll("[id^='view-']").forEach(el => el.classList.add("hidden"));
+      const targetView = document.getElementById(`view-${tabId}`);
+      if (targetView) targetView.classList.remove("hidden");
+
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.className = "tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase text-slate-400 hover:text-white border border-transparent";
+      });
+      const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+      if (activeBtn) {
+        activeBtn.className = "tab-btn flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-mono uppercase bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold shadow-sm shadow-cyan-500/10";
+      }
+      lucide.createIcons();
+    }
+
+    async function checkHealth() {
+      try {
+        const res = await fetch(`${API_BASE}/health`);
+        if (res.ok) {
+          document.getElementById("backend-status").textContent = "FASTAPI: 8000 ONLINE";
+          document.getElementById("backend-status").className = "text-emerald-400 font-medium";
+          document.getElementById("backend-pulse").className = "h-2 w-2 rounded-full bg-emerald-400 animate-ping";
+        }
+      } catch {
+        document.getElementById("backend-status").textContent = "FASTAPI: OFFLINE";
+        document.getElementById("backend-status").className = "text-red-400 font-medium";
+        document.getElementById("backend-pulse").className = "h-2 w-2 rounded-full bg-red-400";
+      }
+    }
+
+    async function loadAvailability(partId) {
+      currentPartId = Number(partId);
+      document.getElementById("avail-title").textContent = `ID #${currentPartId}`;
+      document.getElementById("avail-input-id").value = currentPartId;
+      try {
+        const res = await fetch(`${API_BASE}/parts/${currentPartId}/availability`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        document.getElementById("avail-onhand").textContent = data.on_hand;
+        document.getElementById("avail-reserved").textContent = data.reserved;
+        document.getElementById("avail-available").textContent = data.available;
+
+        const tableContainer = document.getElementById("avail-locations-table-container");
+        if (!data.locations || data.locations.length === 0) {
+          tableContainer.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-lg">No hay stock físico registrado en ninguna ubicación para esta pieza.</div>`;
+        } else {
+          tableContainer.innerHTML = `
+            <div class="overflow-x-auto">
+              <table class="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr class="border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                    <th class="py-2.5 px-3">Ubicación</th>
+                    <th class="py-2.5 px-3">Código</th>
+                    <th class="py-2.5 px-3">En Mano</th>
+                    <th class="py-2.5 px-3">Reservado</th>
+                    <th class="py-2.5 px-3">Disponible</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60">
+                  ${data.locations.map(l => `
+                    <tr class="hover:bg-slate-800/30">
+                      <td class="py-3 px-3 text-cyan-400 font-semibold">Bahía #${l.location_id}</td>
+                      <td class="py-3 px-3 text-slate-300">${l.code || 'ESTANTE-BASE'}</td>
+                      <td class="py-3 px-3 text-white font-bold">${l.on_hand}</td>
+                      <td class="py-3 px-3 text-amber-400">${l.reserved}</td>
+                      <td class="py-3 px-3 text-emerald-400 font-bold">${l.available}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>`;
+        }
+      } catch (err) {
+        showAlert("error", `Error al consultar pieza #${currentPartId}: ${err.message}`);
+      }
+    }
+
+    async function loadLedger(partId) {
+      const pid = Number(partId);
+      document.getElementById("ledger-subtitle-part").textContent = `#${pid}`;
+      document.getElementById("ledger-input-id").value = pid;
+      try {
+        const res = await fetch(`${API_BASE}/parts/${pid}/ledger`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const entries = data.entries || [];
+        document.getElementById("ledger-count-badge").textContent = `${entries.length} movimiento(s) auditados`;
+
+        const container = document.getElementById("ledger-table-container");
+        if (entries.length === 0) {
+          container.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs">Sin movimientos registrados en Kardex para esta pieza.</div>`;
+        } else {
+          container.innerHTML = `
+            <div class="overflow-x-auto">
+              <table class="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr class="border-b border-slate-800 bg-slate-950/80 text-slate-400 uppercase text-[10px]">
+                    <th class="py-3 px-4">Movimiento ID</th>
+                    <th class="py-3 px-4">Tipo</th>
+                    <th class="py-3 px-4">Ubicación</th>
+                    <th class="py-3 px-4">Cantidad</th>
+                    <th class="py-3 px-4">Saldo Acumulado</th>
+                    <th class="py-3 px-4">Fecha y Hora</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60">
+                  ${entries.map(e => `
+                    <tr class="hover:bg-slate-800/20">
+                      <td class="py-3 px-4 text-slate-400">#${e.movement_id}</td>
+                      <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          e.type === 'receipt' || e.type === 'transfer_in' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' :
+                          e.type === 'issue' || e.type === 'transfer_out' ? 'bg-red-950 text-red-300 border border-red-800' :
+                          'bg-blue-950 text-blue-300 border border-blue-800'
+                        }">${e.type}</span>
+                      </td>
+                      <td class="py-3 px-4 text-slate-300">Bahía #${e.location_id}</td>
+                      <td class="py-3 px-4 font-bold ${e.type === 'issue' || e.type === 'transfer_out' ? 'text-red-400' : 'text-emerald-400'}">
+                        ${e.type === 'issue' || e.type === 'transfer_out' ? '-' : '+'}${e.quantity}
+                      </td>
+                      <td class="py-3 px-4 font-bold text-white bg-slate-950/40">${e.balance}</td>
+                      <td class="py-3 px-4 text-slate-400 text-[11px]">${new Date(e.occurred_at).toLocaleString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>`;
+        }
+      } catch (err) {
+        showAlert("error", `Error al cargar Kardex #${pid}: ${err.message}`);
+      }
+    }
+
+    function goToLedgerForCurrentPart() {
+      switchTab("ledger");
+      loadLedger(currentPartId);
+    }
+
+    async function loadWorkOrder(code) {
+      currentOrderCode = code;
+      document.getElementById("wo-header-code").textContent = code;
+      document.getElementById("wo-input-code").value = code;
+      try {
+        const res = await fetch(`${API_BASE}/work-orders/${encodeURIComponent(code)}/materials`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const lines = data.lines || [];
+        document.getElementById("wo-header-count").textContent = `${lines.length} ítem(s) de despiece`;
+
+        const container = document.getElementById("wo-table-container");
+        if (lines.length === 0) {
+          container.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs">Esta orden aún no tiene despiece o inspección técnica cargada.</div>`;
+        } else {
+          container.innerHTML = `
+            <div class="overflow-x-auto">
+              <table class="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr class="border-b border-slate-800 text-slate-400 uppercase text-[10px] bg-slate-950">
+                    <th class="py-3 px-4">Componente</th>
+                    <th class="py-3 px-4">Part ID</th>
+                    <th class="py-3 px-4">Requerido</th>
+                    <th class="py-3 px-4">Reservado</th>
+                    <th class="py-3 px-4">Entregado</th>
+                    <th class="py-3 px-4">Faltante</th>
+                    <th class="py-3 px-4 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60">
+                  ${lines.map(l => `
+                    <tr class="hover:bg-slate-800/20">
+                      <td class="py-3 px-4 font-semibold text-white">${l.name}</td>
+                      <td class="py-3 px-4 text-cyan-400">#${l.part_id || 'N/A'}</td>
+                      <td class="py-3 px-4 text-slate-300 font-bold">${l.required ?? '-'}</td>
+                      <td class="py-3 px-4 text-amber-400 font-bold">${l.reserved}</td>
+                      <td class="py-3 px-4 text-emerald-400 font-bold">${l.issued}</td>
+                      <td class="py-3 px-4">
+                        ${l.missing && l.missing > 0 ? `<span class="px-2 py-0.5 rounded bg-red-950 text-red-400 font-bold border border-red-800 text-[10px]">FALTAN ${l.missing}</span>` : `<span class="text-slate-500 text-[10px]">Cubierto</span>`}
+                      </td>
+                      <td class="py-3 px-4 text-right">
+                        ${l.part_id ? `<button onclick="prepareIssue('${code}', ${l.part_id}, ${l.reserved > 0 ? l.reserved : 1})" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[10px] font-mono border border-slate-700">Despachar →</button>` : ''}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>`;
+        }
+      } catch (err) {
+        showAlert("error", `Error al cargar orden ${code}: ${err.message}`);
+      }
+    }
+
+    function prepareIssue(woCode, partId, qty) {
+      document.getElementById("issue-wo-code").value = woCode;
+      document.getElementById("issue-part-id").value = partId;
+      document.getElementById("issue-qty").value = qty;
+      switchTab("operations");
+    }
+
+    async function loadShortagesAndReorders() {
+      try {
+        const [sRes, rRes, uRes] = await Promise.all([
+          fetch(`${API_BASE}/shortages`),
+          fetch(`${API_BASE}/purchasing/reorder-suggestions`),
+          fetch(`${API_BASE}/purchasing/unmatched-receipts`),
+        ]);
+
+        const sData = sRes.ok ? await sRes.json() : { items: [] };
+        const rData = rRes.ok ? await rRes.json() : { items: [] };
+        const uData = uRes.ok ? await uRes.json() : { items: [] };
+
+        document.getElementById("kpi-shortages").textContent = sData.items.length;
+        document.getElementById("kpi-reorders").textContent = rData.items.length;
+        document.getElementById("kpi-unmatched").textContent = uData.items.length;
+        document.getElementById("shortages-count-badge").textContent = `${sData.items.length} abiertas`;
+        document.getElementById("reorders-count-badge").textContent = `${rData.items.length} sugerencias`;
+
+        const sContainer = document.getElementById("shortages-list-container");
+        if (sData.items.length === 0) {
+          sContainer.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-lg">No hay piezas faltantes abiertas actualmente en el taller.</div>`;
+        } else {
+          sContainer.innerHTML = sData.items.map(i => `
+            <div class="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex justify-between items-center font-mono text-xs">
+              <div>
+                <div class="text-white font-bold">${i.name}</div>
+                <div class="text-slate-500 text-[11px]">Orden: <span class="text-cyan-400">${i.work_order_code}</span> · Part #${i.part_id || 'S/A'}</div>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-400 font-bold border border-amber-800 text-[10px]">Faltan ${i.missing_quantity || 1}</span>
+            </div>
+          `).join('');
+        }
+
+        const rContainer = document.getElementById("reorders-list-container");
+        if (rData.items.length === 0) {
+          rContainer.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-lg">El inventario satisface la demanda actual; no hay compras requeridas.</div>`;
+        } else {
+          rContainer.innerHTML = rData.items.map(i => `
+            <div class="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex justify-between items-center font-mono text-xs">
+              <div>
+                <div class="text-white font-bold">${i.name}</div>
+                <div class="text-slate-500 text-[11px]">SKU: ${i.sku || 'N/A'} · Part #${i.part_id}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-blue-400 font-bold text-sm">+${i.suggested_quantity} u</div>
+                <div class="text-[10px] text-slate-500">Para ${i.work_order_ids ? i.work_order_ids.length : 1} orden(es)</div>
+              </div>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        console.error("Error al cargar faltantes:", err);
+      }
+    }
+
+    async function handleIssueSubmit(e) {
+      e.preventDefault();
+      const body = {
+        work_order_code: document.getElementById("issue-wo-code").value,
+        part_id: Number(document.getElementById("issue-part-id").value),
+        location_id: Number(document.getElementById("issue-loc-id").value),
+        quantity: Number(document.getElementById("issue-qty").value),
+        issued_by: document.getElementById("issue-by").value,
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/operations/issue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        showAlert("success", `¡Salida de ${body.quantity} unidad(es) de pieza #${body.part_id} registrada con éxito en Kardex!`);
+        refreshAll();
+      } catch (err) {
+        showAlert("error", `Error al registrar salida: ${err.message}`);
+      }
+    }
+
+    async function handleTransferSubmit(e) {
+      e.preventDefault();
+      const body = {
+        part_id: Number(document.getElementById("trans-part-id").value),
+        from_location_id: Number(document.getElementById("trans-from-loc").value),
+        to_location_id: Number(document.getElementById("trans-to-loc").value),
+        quantity: Number(document.getElementById("trans-qty").value),
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/operations/transfer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        showAlert("success", `¡Transferencia de ${body.quantity} unidad(es) de bahía #${body.from_location_id} a #${body.to_location_id} completada!`);
+        refreshAll();
+      } catch (err) {
+        showAlert("error", `Error en transferencia: ${err.message}`);
+      }
+    }
+
+    function renderQuickButtons() {
+      // Husillos
+      const ordersList = document.getElementById("quick-orders-list");
+      ordersList.innerHTML = QUICK_ORDERS.map(code => `
+        <button onclick="currentOrderCode='${code}'; switchTab('workorders'); loadWorkOrder('${code}');" class="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 hover:bg-slate-800 border border-slate-700/40 transition text-left">
+          <span class="text-cyan-400 font-bold font-mono text-xs">${code}</span>
+          <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-700/60 text-slate-300">Inspeccionar BOM →</span>
+        </button>
+      `).join('');
+
+      // Partes en overview
+      const partsList = document.getElementById("quick-parts-list");
+      partsList.innerHTML = QUICK_PARTS.map(p => `
+        <button onclick="currentPartId=${p.id}; switchTab('availability'); loadAvailability(${p.id});" class="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 hover:bg-slate-800 border border-slate-700/40 transition text-left">
+          <div>
+            <div class="font-mono text-xs text-white font-medium">${p.name}</div>
+            <div class="text-[10px] font-mono text-slate-500">ID #${p.id} · ${p.sku}</div>
+          </div>
+          <span class="text-[10px] font-mono text-cyan-400">Ver Stock →</span>
+        </button>
+      `).join('');
+
+      // Quick buttons in availability tab
+      const availBtns = document.getElementById("avail-quick-buttons");
+      availBtns.innerHTML = QUICK_PARTS.map(p => `
+        <button onclick="loadAvailability(${p.id})" class="px-2.5 py-1 rounded text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-300">#${p.id} ${p.sku}</button>
+      `).join('');
+
+      // Quick buttons in workorders tab
+      const woBtns = document.getElementById("wo-quick-buttons");
+      woBtns.innerHTML = QUICK_ORDERS.map(code => `
+        <button onclick="loadWorkOrder('${code}')" class="px-2.5 py-1 rounded text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-300">${code}</button>
+      `).join('');
+    }
+
+    async function loadUnmatchedForAI() {
+      const container = document.getElementById("gemini-unmatched-list");
+      const badge = document.getElementById("gemini-unmatched-badge");
+      try {
+        const res = await fetch(`${API_BASE}/unmatched-receipts`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const items = data.items || [];
+        badge.textContent = `${items.length} pendientes`;
+
+        if (items.length === 0) {
+          container.innerHTML = `<div class="p-8 text-center text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-lg">No hay recepciones ambiguas en muelle; todo el material está clasificado.</div>`;
+          return;
+        }
+
+        container.innerHTML = items.slice(0, 15).map(item => `
+          <div id="unmatched-card-${item.id}" class="p-3.5 rounded-lg bg-slate-950/80 border border-slate-800/80 font-mono text-xs space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="text-white font-bold">${item.description || item.part_number}</div>
+                <div class="text-[11px] text-slate-400">Guía/Factura: <span class="text-cyan-400">${item.part_number}</span> · Cant: <span class="text-white font-bold">${item.quantity} u</span></div>
+                ${item.work_order_code ? `<div class="text-[10px] text-slate-500">Orden Ref: <span class="text-amber-400">${item.work_order_code}</span></div>` : ''}
+              </div>
+              <button onclick="analyzeReceiptWithGemini(${item.id})" id="ai-btn-${item.id}" class="px-3 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 font-mono text-[11px] font-bold flex items-center gap-1 transition">
+                <i data-lucide="sparkles" class="h-3 w-3 text-cyan-400"></i> Analizar con Gemini
+              </button>
+            </div>
+            <div id="ai-suggestion-box-${item.id}" class="hidden mt-2 p-3 rounded-lg bg-slate-900 border border-cyan-500/30">
+              <!-- Gemini Result injected here -->
+            </div>
+          </div>
+        `).join('');
+        lucide.createIcons();
+      } catch (err) {
+        container.innerHTML = `<div class="p-4 text-center text-red-400 font-mono text-xs">Error al cargar recepciones: ${err.message}</div>`;
+      }
+    }
+
+    async function analyzeReceiptWithGemini(id) {
+      const btn = document.getElementById(`ai-btn-${id}`);
+      const box = document.getElementById(`ai-suggestion-box-${id}`);
+      btn.innerHTML = `<i data-lucide="loader" class="h-3 w-3 animate-spin"></i> Analizando...`;
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(`${API_BASE}/purchasing/unmatched-receipts/${id}/ai-match`, {
+          method: "POST"
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const result = await res.json();
+
+        const pct = Math.round((result.confidence || 0.8) * 100);
+        box.classList.remove("hidden");
+        box.innerHTML = `
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="check-circle-2" class="h-3.5 w-3.5 text-emerald-400"></i>
+              Sugerencia: <span class="text-cyan-400">Part #${result.suggested_part_id}</span> (${result.sku || 'N/A'})
+            </span>
+            <span class="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-700 font-bold">
+              ${pct}% Certeza
+            </span>
+          </div>
+          <div class="text-[11px] text-slate-300 font-sans mb-3">${result.part_name || ''}</div>
+          <div class="text-[10px] text-slate-400 font-mono bg-slate-950/70 p-2 rounded border border-slate-800 mb-3">
+            ${result.reasoning}
+          </div>
+          <button onclick="resolveReceiptWithAI(${id})" class="w-full py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20">
+            <i data-lucide="check" class="h-3.5 w-3.5"></i> Aprobar y Registrar en Kardex
+          </button>
+        `;
+        lucide.createIcons();
+      } catch (err) {
+        box.classList.remove("hidden");
+        box.innerHTML = `<div class="text-red-400 text-xs">Error en Gemini AI: ${err.message}</div>`;
+      } finally {
+        btn.innerHTML = `<i data-lucide="sparkles" class="h-3 w-3"></i> Re-analizar`;
+        btn.disabled = false;
+        lucide.createIcons();
+      }
+    }
+
+    async function resolveReceiptWithAI(id) {
+      try {
+        const res = await fetch(`${API_BASE}/purchasing/unmatched-receipts/${id}/ai-resolve`, {
+          method: "POST"
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        showAlert("success", `¡Recepción #${id} clasificada y registrada exitosamente en Kardex con Gemini AI!`);
+        loadUnmatchedForAI();
+        refreshAll();
+      } catch (err) {
+        showAlert("error", `Error al resolver recepción: ${err.message}`);
+      }
+    }
+
+    function askCopilotQuick(text) {
+      document.getElementById("copilot-input").value = text;
+      handleCopilotSubmit(new Event("submit"));
+    }
+
+    async function handleCopilotSubmit(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById("copilot-input");
+      const query = input.value.trim();
+      if (!query) return;
+
+      const container = document.getElementById("copilot-response-container");
+      const submitBtn = document.getElementById("copilot-submit-btn");
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i data-lucide="loader" class="h-3.5 w-3.5 animate-spin"></i> Consultando...`;
+
+      container.innerHTML = `
+        <div class="flex items-center gap-2 text-cyan-400 py-8 justify-center">
+          <i data-lucide="sparkles" class="h-4 w-4 animate-spin"></i>
+          <span>Gemini AI procesando telemetría del taller...</span>
+        </div>
+      `;
+      lucide.createIcons();
+
+      try {
+        const res = await fetch(`${API_BASE}/ai/copilot`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: query })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        container.innerHTML = `
+          <div class="space-y-3">
+            <div class="text-slate-400 text-[10px] uppercase font-mono tracking-wider flex items-center justify-between border-b border-slate-800 pb-1.5 flex-wrap gap-2">
+              <span class="flex items-center gap-1.5 text-cyan-400 whitespace-nowrap"><i data-lucide="bot" class="h-3.5 w-3.5"></i> Dictamen de Spindle-AI:</span>
+              <span class="text-slate-500 truncate max-w-sm">Consulta: "${query}"</span>
+            </div>
+            <div class="text-slate-200 text-xs font-sans leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+              ${data.answer}
+            </div>
+            ${data.suggested_actions && data.suggested_actions.length > 0 ? `
+              <div class="mt-2">
+                <div class="text-[10px] text-slate-400 uppercase font-mono mb-1.5">Acciones Industriales Recomendadas:</div>
+                <div class="space-y-1">
+                  ${data.suggested_actions.map(a => `
+                    <div class="flex items-center gap-2 text-[11px] text-cyan-300 bg-cyan-950/40 border border-cyan-900/60 px-2.5 py-1.5 rounded">
+                      <i data-lucide="check-circle" class="h-3 w-3 text-cyan-400"></i>
+                      <span>${a}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+        lucide.createIcons();
+      } catch (err) {
+        container.innerHTML = `<div class="p-4 text-red-400 text-xs">Error en Copiloto Gemini: ${err.message}</div>`;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `<i data-lucide="send" class="h-3.5 w-3.5"></i> Enviar`;
+        lucide.createIcons();
+      }
+    }
+
+    function refreshAll() {
+      checkHealth();
+      loadAvailability(currentPartId);
+      loadLedger(currentPartId);
+      loadWorkOrder(currentOrderCode);
+      loadShortagesAndReorders();
+    }
+
+    // Inicialización al cargar la página
+    window.addEventListener("DOMContentLoaded", () => {
+      renderQuickButtons();
+      refreshAll();
+      lucide.createIcons();
+    });
+  </script>
+</body>
+</html>

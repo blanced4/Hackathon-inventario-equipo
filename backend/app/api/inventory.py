@@ -1,14 +1,15 @@
 """
 Rutas oficiales del API REST del Servicio de Inventario.
-Cumplen al 100% con contract/openapi.yaml.
+Cumplen al 100% con contract/openapi.yaml y la base de datos Supabase.
 """
 
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.services import kafka_producer
 from app.models.models import (
     InventoryMovement,
     Location,
@@ -48,57 +49,67 @@ router = APIRouter(tags=["inventario"])
 @router.get(
     "/parts/{part_id}/availability",
     response_model=AvailabilityResponse,
-    summary="Saldo de una pieza, total y por ubicación",
+    summary="Saldo de pieza total y por estante",
 )
-async def get_part_availability(part_id: int, db: AsyncSession = Depends(get_db)):
-    part_query = await db.execute(select(Part).where(Part.part_id == part_id))
-    part = part_query.scalar_one_or_none()
+async def get_part_availability(
+    part_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    part_q = await db.execute(select(Part).where(Part.part_id == part_id))
+    part = part_q.scalar_one_or_none()
     if not part:
-        raise HTTPException(status_code=404, detail=f"Pieza {part_id} no encontrada")
+        raise HTTPException(status_code=404, detail=f"Pieza {part_id} no encontrada en catálogo")
 
-    # Saldo total (on_hand = SUM(quantity))
-    soh_q = await db.execute(
-        select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+    # On hand total = suma de deltas en inventory_movements
+    stock_q = await db.execute(
+        select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
             InventoryMovement.part_id == part_id
         )
     )
-    total_on_hand = soh_q.scalar() or 0
+    total_on_hand = int(stock_q.scalar() or 0)
 
-    # Total reservado activo
+    # Reservas activas totales
     res_q = await db.execute(
         select(func.coalesce(func.sum(Reservation.quantity), 0)).where(
             Reservation.part_id == part_id,
             Reservation.status == "active",
         )
     )
-    total_reserved = res_q.scalar() or 0
+    total_reserved = int(res_q.scalar() or 0)
     total_available = total_on_hand - total_reserved
 
-    # Saldo por ubicación
-    loc_soh_q = await db.execute(
+    # On hand agrupado por ubicación
+    loc_stock_q = await db.execute(
         select(
             InventoryMovement.location_id,
-            func.coalesce(func.sum(InventoryMovement.quantity), 0).label("on_hand"),
+            func.coalesce(func.sum(InventoryMovement.delta), 0).label("on_hand"),
         )
         .where(InventoryMovement.part_id == part_id)
         .group_by(InventoryMovement.location_id)
     )
-    loc_stock = {row[0]: row[1] for row in loc_soh_q.fetchall()}
-
-    # Obtener todas las ubicaciones conocidas
-    locs_q = await db.execute(select(Location))
-    all_locs = locs_q.scalars().all()
+    loc_rows = loc_stock_q.all()
 
     locations_list = []
-    for loc in all_locs:
-        on_hand_loc = loc_stock.get(loc.location_id, 0)
+    for r in loc_rows:
+        loc_id = r.location_id
+        loc_on_hand = int(r.on_hand)
+        if loc_on_hand <= 0:
+            continue
+
+        loc_meta_q = await db.execute(select(Location).where(Location.location_id == loc_id))
+        loc_meta = loc_meta_q.scalar_one_or_none()
+        code = loc_meta.code if loc_meta else f"U-{loc_id}"
+
+        # Disponibilidad local
+        loc_available = max(0, loc_on_hand - total_reserved)
+
         locations_list.append(
             LocationAvailability(
-                location_id=loc.location_id,
-                code=loc.code,
-                on_hand=on_hand_loc,
-                reserved=0,
-                available=on_hand_loc,
+                location_id=loc_id,
+                code=code,
+                on_hand=loc_on_hand,
+                reserved=total_reserved,
+                available=loc_available,
             )
         )
 
@@ -115,96 +126,128 @@ async def get_part_availability(part_id: int, db: AsyncSession = Depends(get_db)
 @router.get(
     "/parts/{part_id}/ledger",
     response_model=LedgerResponse,
-    summary="Kardex de una pieza",
+    summary="Kardex de la pieza ordenado por fecha con saldo corrido",
 )
-async def get_part_ledger(part_id: int, db: AsyncSession = Depends(get_db)):
-    part_query = await db.execute(select(Part).where(Part.part_id == part_id))
-    if not part_query.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail=f"Pieza {part_id} no encontrada")
+async def get_part_ledger(
+    part_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    part_q = await db.execute(select(Part).where(Part.part_id == part_id))
+    if not part_q.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Pieza no encontrada")
 
-    # Movimientos ordenados del más reciente al más antiguo
-    moves_q = await db.execute(
+    movs_q = await db.execute(
         select(InventoryMovement)
         .where(InventoryMovement.part_id == part_id)
-        .order_by(InventoryMovement.occurred_at.asc(), InventoryMovement.movement_id.asc())
+        .order_by(InventoryMovement.created_at.asc(), InventoryMovement.movement_id.asc())
     )
-    all_moves = moves_q.scalars().all()
+    movs = movs_q.scalars().all()
 
     running_balance = 0
-    entries_asc = []
-    for m in all_moves:
-        running_balance += m.quantity
-        entries_asc.append(
+    entries = []
+    for m in movs:
+        running_balance += m.delta
+        entries.append(
             LedgerEntry(
                 movement_id=m.movement_id,
-                type=m.type,
+                type=m.movement_type,
                 part_id=m.part_id,
                 location_id=m.location_id,
-                quantity=m.quantity,
-                occurred_at=m.occurred_at,
-                reference=m.reference,
+                quantity=m.delta,
+                occurred_at=m.created_at,
+                reference=m.reference_id,
                 balance=running_balance,
             )
         )
 
-    return LedgerResponse(part_id=part_id, entries=list(reversed(entries_asc)))
+    entries.reverse()
+    return LedgerResponse(part_id=part_id, entries=entries)
 
 
 # ── 3. GET /work-orders/{code}/materials ─────────────────────────────────────
 @router.get(
     "/work-orders/{code}/materials",
     response_model=WorkOrderMaterialsResponse,
-    summary="Materiales de una orden",
+    summary="Materiales de la orden con requeridos, reservados y faltantes",
 )
-async def get_work_order_materials(code: str, db: AsyncSession = Depends(get_db)):
+async def get_work_order_materials(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+):
     wo_q = await db.execute(select(WorkOrder).where(WorkOrder.code == code))
     wo = wo_q.scalar_one_or_none()
     if not wo:
-        raise HTTPException(status_code=404, detail=f"Orden {code} no encontrada")
+        raise HTTPException(status_code=404, detail="Orden de trabajo no encontrada")
 
-    # Reservas activas o cumplidas
-    res_q = await db.execute(
-        select(Reservation).where(Reservation.work_order_id == wo.work_order_id)
+    bom_q = await db.execute(
+        select(BomLine).where(BomLine.model_id == wo.model_id)
     )
-    reservations = res_q.scalars().all()
-
-    # Faltantes de la orden
-    short_q = await db.execute(
-        select(Shortage).where(
-            Shortage.work_order_id == wo.work_order_id,
-            Shortage.status == "open",
-        )
-    )
-    shortages = short_q.scalars().all()
+    bom_lines = bom_q.scalars().all()
 
     lines = []
-    for r in reservations:
-        part_q = await db.execute(select(Part).where(Part.part_id == r.part_id))
-        part_obj = part_q.scalar_one_or_none()
-        lines.append(
-            MaterialLine(
-                inspection_item_id=r.inspection_item_id or 0,
-                bom_line_id=r.bom_line_id or 0,
-                part_id=r.part_id,
-                name=part_obj.name if part_obj else "",
-                required=r.quantity,
-                reserved=r.quantity if r.status == "active" else 0,
-                issued=r.quantity if r.status == "fulfilled" else 0,
-                missing=0,
+    for idx, bl in enumerate(bom_lines, start=1):
+        # Reservas activas
+        res_conditions = [Reservation.work_order_id == wo.work_order_id, Reservation.status == "active"]
+        if bl.part_id:
+            res_conditions.append(
+                or_(
+                    Reservation.bom_line_id == bl.bom_line_id,
+                    and_(Reservation.bom_line_id.is_(None), Reservation.part_id == bl.part_id),
+                )
             )
-        )
+        else:
+            res_conditions.append(Reservation.bom_line_id == bl.bom_line_id)
 
-    for s in shortages:
+        res_q = await db.execute(
+            select(func.coalesce(func.sum(Reservation.quantity), 0)).where(*res_conditions)
+        )
+        reserved_qty = int(res_q.scalar() or 0)
+
+        # Faltantes abiertos
+        short_conditions = [Shortage.work_order_id == wo.work_order_id, Shortage.status == "open"]
+        if bl.part_id:
+            short_conditions.append(
+                or_(
+                    Shortage.bom_line_id == bl.bom_line_id,
+                    and_(Shortage.bom_line_id.is_(None), Shortage.part_id == bl.part_id),
+                )
+            )
+        else:
+            short_conditions.append(Shortage.bom_line_id == bl.bom_line_id)
+
+        short_q = await db.execute(
+            select(func.coalesce(func.sum(Shortage.missing_quantity), 0)).where(*short_conditions)
+        )
+        missing_qty = int(short_q.scalar() or 0)
+
+        # Salidas registradas para esta orden y pieza
+        issued_qty = 0
+        if bl.part_id:
+            iss_q = await db.execute(
+                select(func.coalesce(func.sum(-InventoryMovement.delta), 0)).where(
+                    InventoryMovement.movement_type == "issue",
+                    InventoryMovement.reference_id == wo.code,
+                    InventoryMovement.part_id == bl.part_id,
+                )
+            )
+            issued_qty = int(iss_q.scalar() or 0)
+
+        # Requerido: suma de reservado + faltante + entregado si hubo inspección; si no, del catálogo
+        if reserved_qty + missing_qty + issued_qty > 0:
+            required_qty = reserved_qty + missing_qty + issued_qty
+        else:
+            required_qty = bl.qty_per_unit
+
         lines.append(
             MaterialLine(
-                inspection_item_id=s.inspection_item_id or 0,
-                bom_line_id=s.bom_line_id or 0,
-                part_id=s.part_id,
-                name=s.name,
-                required=s.missing_quantity,
-                reserved=0,
-                issued=0,
-                missing=s.missing_quantity,
+                inspection_item_id=bl.sort_order if bl.sort_order else idx,
+                bom_line_id=bl.bom_line_id,
+                part_id=bl.part_id,
+                name=bl.name,
+                required=required_qty,
+                reserved=reserved_qty,
+                issued=issued_qty,
+                missing=missing_qty if missing_qty > 0 else 0,
             )
         )
 
@@ -221,71 +264,78 @@ async def get_work_order_materials(code: str, db: AsyncSession = Depends(get_db)
     response_model=ShortagesListResponse,
     summary="Faltantes abiertos",
 )
-async def get_shortages(
-    work_order_code: Optional[str] = Query(None),
-    part_id: Optional[int] = Query(None),
+async def get_open_shortages(
+    work_order_code: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Shortage).where(Shortage.status == "open")
+    query = (
+        select(Shortage, WorkOrder.code.label("wo_code"))
+        .outerjoin(WorkOrder, Shortage.work_order_id == WorkOrder.work_order_id)
+        .where(
+            Shortage.status == "open",
+            or_(WorkOrder.is_deleted == False, WorkOrder.is_deleted.is_(None)),
+        )
+    )
     if work_order_code:
-        stmt = stmt.where(Shortage.work_order_code == work_order_code)
-    if part_id:
-        stmt = stmt.where(Shortage.part_id == part_id)
+        query = query.where(WorkOrder.code == work_order_code)
 
-    res = await db.execute(stmt)
-    shortages = res.scalars().all()
+    query = query.order_by(Shortage.created_at.asc())
+    short_q = await db.execute(query)
+    rows = short_q.all()
 
-    return ShortagesListResponse(
-        items=[
+    items = []
+    for s, wo_code in rows:
+        items.append(
             ShortageItem(
                 work_order_id=s.work_order_id,
-                work_order_code=s.work_order_code or "",
+                work_order_code=wo_code or f"WO-{s.work_order_id}",
                 part_id=s.part_id,
                 name=s.name,
                 missing_quantity=s.missing_quantity,
-                inspection_item_id=s.inspection_item_id or 0,
-                opened_at=s.opened_at,
+                inspection_item_id=s.inspection_item_id or 1,
+                opened_at=s.created_at,
             )
-            for s in shortages
-        ]
-    )
+        )
+
+    return ShortagesListResponse(items=items)
 
 
 # ── 5. GET /reorder-suggestions ──────────────────────────────────────────────
 @router.get(
     "/reorder-suggestions",
     response_model=ReorderSuggestionsResponse,
-    summary="Sugerencias de compra vigentes",
+    summary="Sugerencias de compra para reabasto",
 )
 async def get_reorder_suggestions(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(Shortage).where(Shortage.status == "open", Shortage.part_id.isnot(None))
+    short_q = await db.execute(
+        select(
+            Shortage.part_id,
+            Part.sku,
+            Part.name,
+            func.sum(Shortage.missing_quantity).label("suggested"),
+        )
+        .join(Part, Shortage.part_id == Part.part_id)
+        .where(Shortage.status == "open", Shortage.part_id.isnot(None))
+        .group_by(Shortage.part_id, Part.sku, Part.name)
     )
-    shortages = res.scalars().all()
-
-    grouped = {}
-    for s in shortages:
-        pid = s.part_id
-        if pid not in grouped:
-            grouped[pid] = {
-                "name": s.name,
-                "missing_sum": 0,
-                "work_order_ids": set(),
-            }
-        grouped[pid]["missing_sum"] += s.missing_quantity or 0
-        grouped[pid]["work_order_ids"].add(s.work_order_id)
+    rows = short_q.all()
 
     items = []
-    for pid, data in grouped.items():
-        part_q = await db.execute(select(Part).where(Part.part_id == pid))
-        part = part_q.scalar_one_or_none()
+    for r in rows:
+        wo_ids_q = await db.execute(
+            select(Shortage.work_order_id)
+            .where(Shortage.part_id == r.part_id, Shortage.status == "open")
+            .distinct()
+        )
+        wo_ids = [w[0] for w in wo_ids_q.fetchall()]
+
         items.append(
             ReorderSuggestionItem(
-                part_id=pid,
-                sku=part.sku if part else None,
-                name=data["name"],
-                suggested_quantity=max(1, data["missing_sum"]),
-                work_order_ids=sorted(list(data["work_order_ids"])),
+                part_id=r.part_id,
+                sku=r.sku,
+                name=r.name,
+                suggested_quantity=int(r.suggested or 0),
+                work_order_ids=wo_ids,
             )
         )
 
@@ -296,61 +346,62 @@ async def get_reorder_suggestions(db: AsyncSession = Depends(get_db)):
 @router.get(
     "/unmatched-receipts",
     response_model=UnmatchedReceiptsResponse,
-    summary="Recepciones sin relacionar",
+    summary="Compras que llegaron a recepción y no se identificaron",
 )
 async def get_unmatched_receipts(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
+    unmatched_q = await db.execute(
         select(UnmatchedReceipt).where(UnmatchedReceipt.status == "pending")
     )
-    receipts = res.scalars().all()
+    rows = unmatched_q.scalars().all()
 
-    return UnmatchedReceiptsResponse(
-        items=[
+    items = []
+    for r in rows:
+        items.append(
             UnmatchedReceiptItem(
                 id=r.id,
                 purchase_line_id=r.purchase_line_id,
                 part_number=r.part_number,
                 description=r.description or "",
                 quantity=r.quantity,
-                unit_price=str(r.unit_price) if r.unit_price else None,
-                currency=r.currency,
+                unit_price="0.00",
+                currency="MXN",
                 received_at=r.received_at,
                 work_order_code=r.work_order_code,
             )
-            for r in receipts
-        ]
-    )
+        )
+
+    return UnmatchedReceiptsResponse(items=items)
 
 
-# ── 7. POST /issues (Salida por escaneo en piso) ─────────────────────────────
+# ── 7. POST /issues (Salida por escaneo sin permitir negativos) ──────────────
 @router.post(
     "/issues",
     status_code=status.HTTP_201_CREATED,
     response_model=MovementResponse,
-    summary="Salida de material contra orden",
+    summary="Salida de material para una orden",
 )
 async def issue_part(req: IssueRequest, db: AsyncSession = Depends(get_db)):
-    stock_q = await db.execute(
-        select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+    # Validar disponibilidad real en esa ubicación
+    stk_q = await db.execute(
+        select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
             InventoryMovement.part_id == req.part_id,
             InventoryMovement.location_id == req.location_id,
         )
     )
-    location_on_hand = stock_q.scalar() or 0
+    location_on_hand = int(stk_q.scalar() or 0)
 
     if location_on_hand < req.quantity:
         raise HTTPException(
             status_code=409,
-            detail=f"No alcanza el saldo en esa ubicación (disponible: {location_on_hand}, solicitado: {req.quantity})",
+            detail=f"Saldo insuficiente en ubicación (disponible: {location_on_hand}, solicitado: {req.quantity})",
         )
 
     movement = InventoryMovement(
-        type="issue",
+        movement_type="issue",
         part_id=req.part_id,
         location_id=req.location_id,
-        quantity=-req.quantity,
-        occurred_at=func.now(),
-        reference=req.work_order_code,
+        delta=-req.quantity,
+        reference_id=req.work_order_code,
     )
     db.add(movement)
 
@@ -364,24 +415,48 @@ async def issue_part(req: IssueRequest, db: AsyncSession = Depends(get_db)):
                 Reservation.status == "active",
             )
         )
-        res_obj = res_q.scalars().first()
-        if res_obj:
-            if res_obj.quantity <= req.quantity:
+        res_q = await db.execute(
+            select(Reservation).where(
+                Reservation.work_order_id == wo.work_order_id,
+                Reservation.part_id == req.part_id,
+                Reservation.status == "active",
+            ).order_by(Reservation.created_at.asc())
+        )
+        rem_fulfill = req.quantity
+        for res_obj in res_q.scalars().all():
+            if rem_fulfill <= 0:
+                break
+            if res_obj.quantity <= rem_fulfill:
+                rem_fulfill -= res_obj.quantity
+                res_obj.quantity = 0
                 res_obj.status = "fulfilled"
             else:
-                res_obj.quantity -= req.quantity
+                res_obj.quantity -= rem_fulfill
+                rem_fulfill = 0
 
     await db.commit()
     await db.refresh(movement)
 
+    await kafka_producer.publish(
+        "stock.issued",
+        data={
+            "work_order_id": wo.work_order_id if wo else 0,
+            "part_id": req.part_id,
+            "location_id": req.location_id,
+            "quantity": req.quantity,
+            "issued_by": req.issued_by,
+        },
+        key=req.work_order_code,
+    )
+
     return MovementResponse(
         movement_id=movement.movement_id,
-        type=movement.type,
+        type=movement.movement_type,
         part_id=movement.part_id,
         location_id=movement.location_id,
-        quantity=movement.quantity,
-        occurred_at=movement.occurred_at,
-        reference=movement.reference,
+        quantity=movement.delta,
+        occurred_at=movement.created_at,
+        reference=movement.reference_id,
     )
 
 
@@ -394,12 +469,12 @@ async def issue_part(req: IssueRequest, db: AsyncSession = Depends(get_db)):
 )
 async def transfer_part(req: TransferRequest, db: AsyncSession = Depends(get_db)):
     stock_q = await db.execute(
-        select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+        select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
             InventoryMovement.part_id == req.part_id,
             InventoryMovement.location_id == req.from_location_id,
         )
     )
-    origin_stock = stock_q.scalar() or 0
+    origin_stock = int(stock_q.scalar() or 0)
 
     if origin_stock < req.quantity:
         raise HTTPException(
@@ -408,34 +483,43 @@ async def transfer_part(req: TransferRequest, db: AsyncSession = Depends(get_db)
         )
 
     mov_out = InventoryMovement(
-        type="transfer_out",
+        movement_type="transfer_out",
         part_id=req.part_id,
         location_id=req.from_location_id,
-        quantity=-req.quantity,
-        occurred_at=func.now(),
-        reference=f"Transfer to {req.to_location_id}",
+        delta=-req.quantity,
+        reference_id=f"Transfer to {req.to_location_id}",
     )
     mov_in = InventoryMovement(
-        type="transfer_in",
+        movement_type="transfer_in",
         part_id=req.part_id,
         location_id=req.to_location_id,
-        quantity=req.quantity,
-        occurred_at=func.now(),
-        reference=f"Transfer from {req.from_location_id}",
+        delta=req.quantity,
+        reference_id=f"Transfer from {req.from_location_id}",
     )
     db.add(mov_out)
     db.add(mov_in)
     await db.commit()
     await db.refresh(mov_in)
 
+    await kafka_producer.publish(
+        "stock.transferred",
+        data={
+            "part_id": req.part_id,
+            "from_location_id": req.from_location_id,
+            "to_location_id": req.to_location_id,
+            "quantity": req.quantity,
+        },
+        key=f"part:{req.part_id}",
+    )
+
     return MovementResponse(
         movement_id=mov_in.movement_id,
-        type=mov_in.type,
+        type=mov_in.movement_type,
         part_id=mov_in.part_id,
         location_id=mov_in.location_id,
-        quantity=mov_in.quantity,
-        occurred_at=mov_in.occurred_at,
-        reference=mov_in.reference,
+        quantity=mov_in.delta,
+        occurred_at=mov_in.created_at,
+        reference=mov_in.reference_id,
     )
 
 
@@ -453,27 +537,39 @@ async def cycle_count(req: CountRequest, db: AsyncSession = Depends(get_db)):
     adjustments = []
     for line in req.lines:
         stk_q = await db.execute(
-            select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+            select(func.coalesce(func.sum(InventoryMovement.delta), 0)).where(
                 InventoryMovement.part_id == line.part_id,
                 InventoryMovement.location_id == req.location_id,
             )
         )
-        current_qty = stk_q.scalar() or 0
+        current_qty = int(stk_q.scalar() or 0)
         delta = line.counted_quantity - current_qty
 
         if delta != 0:
             adj_mov = InventoryMovement(
-                type="adjustment",
+                movement_type="adjustment",
                 part_id=line.part_id,
                 location_id=req.location_id,
-                quantity=delta,
-                occurred_at=func.now(),
-                reference=req.reason,
+                delta=delta,
+                reference_id=req.reason,
             )
             db.add(adj_mov)
             adjustments.append(AdjustmentItem(part_id=line.part_id, delta=delta))
 
     await db.commit()
+
+    for adj in adjustments:
+        await kafka_producer.publish(
+            "stock.adjusted",
+            data={
+                "part_id": adj.part_id,
+                "location_id": req.location_id,
+                "delta": adj.delta,
+                "reason": req.reason,
+            },
+            key=f"part:{adj.part_id}",
+        )
+
     return CountResponse(adjustments=adjustments)
 
 
@@ -503,24 +599,172 @@ async def resolve_unmatched_receipt(
     receipt.resolved_part_id = req.part_id
 
     receipt_mov = InventoryMovement(
-        type="receipt",
+        movement_type="receipt",
         part_id=req.part_id,
         location_id=loc_id,
-        quantity=receipt.quantity,
-        occurred_at=func.now(),
-        reference=f"Resolved purchase line {receipt.purchase_line_id}",
-        purchase_line_id=receipt.purchase_line_id,
+        delta=receipt.quantity,
+        reference_id=f"Resolved purchase line {receipt.purchase_line_id}",
     )
     db.add(receipt_mov)
     await db.commit()
     await db.refresh(receipt_mov)
 
+    unit_cost_str = "0.00"
+    await kafka_producer.publish(
+        "stock.received",
+        data={
+            "part_id": req.part_id,
+            "location_id": loc_id,
+            "quantity": receipt.quantity,
+            "unit_cost": unit_cost_str,
+            "currency": "MXN",
+            "purchase_line_id": receipt.purchase_line_id,
+        },
+        key=f"part:{req.part_id}",
+    )
+
     return MovementResponse(
         movement_id=receipt_mov.movement_id,
-        type=receipt_mov.type,
+        type=receipt_mov.movement_type,
         part_id=receipt_mov.part_id,
         location_id=receipt_mov.location_id,
-        quantity=receipt_mov.quantity,
-        occurred_at=receipt_mov.occurred_at,
-        reference=receipt_mov.reference,
+        quantity=receipt_mov.delta,
+        occurred_at=receipt_mov.created_at,
+        reference=receipt_mov.reference_id,
     )
+
+
+# ── 11. POST /purchasing/unmatched-receipts/{id}/ai-match ─────────────────────
+from pydantic import BaseModel
+from app.services.gemini_service import (
+    match_unmatched_receipt_with_gemini,
+    ask_industrial_copilot,
+    AIMatchResult,
+    AICopilotResponse,
+)
+
+
+@router.post(
+    "/unmatched-receipts/{id}/ai-match",
+    response_model=AIMatchResult,
+    summary="Analizar recepción con Gemini AI y sugerir pieza del catálogo",
+    tags=["ai"],
+)
+@router.post(
+    "/purchasing/unmatched-receipts/{id}/ai-match",
+    response_model=AIMatchResult,
+    include_in_schema=False,
+)
+async def ai_match_receipt(id: int, db: AsyncSession = Depends(get_db)):
+    """Analiza una recepción no asociada usando Gemini AI y devuelve la pieza sugerida."""
+    receipt_q = await db.execute(select(UnmatchedReceipt).where(UnmatchedReceipt.id == id))
+    receipt = receipt_q.scalar_one_or_none()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Recepción no encontrada")
+
+    parts_q = await db.execute(select(Part))
+    parts = [{"part_id": p.part_id, "sku": p.sku, "name": p.name} for p in parts_q.scalars().all()]
+
+    short_q = await db.execute(select(Shortage).where(Shortage.status == "open"))
+    shortages = [{"part_id": s.part_id, "name": s.name, "missing": s.missing_quantity} for s in short_q.scalars().all()]
+
+    receipt_dict = {
+        "part_number": receipt.part_number,
+        "description": receipt.description,
+        "quantity": receipt.quantity,
+        "work_order_code": receipt.work_order_code,
+    }
+
+    return await match_unmatched_receipt_with_gemini(receipt_dict, parts, shortages)
+
+
+# ── 12. POST /purchasing/unmatched-receipts/{id}/ai-resolve ───────────────────
+@router.post(
+    "/unmatched-receipts/{id}/ai-resolve",
+    response_model=MovementResponse,
+    summary="Resolver recepción automáticamente usando sugerencia de Gemini AI",
+    tags=["ai"],
+)
+@router.post(
+    "/purchasing/unmatched-receipts/{id}/ai-resolve",
+    response_model=MovementResponse,
+    include_in_schema=False,
+)
+async def ai_resolve_receipt(id: int, db: AsyncSession = Depends(get_db)):
+    """Ejecuta el emparejamiento con Gemini y asocia la recepción directamente al Kardex."""
+    match_result = await ai_match_receipt(id=id, db=db)
+    if not match_result.suggested_part_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Gemini AI no pudo encontrar una coincidencia con suficiente certeza en el catálogo",
+        )
+
+    req = ResolveReceiptRequest(part_id=match_result.suggested_part_id, location_id=100)
+    return await resolve_unmatched_receipt(id=id, req=req, db=db)
+
+
+class CopilotQueryRequest(BaseModel):
+    query: str
+
+
+# ── 13. POST /ai/copilot ──────────────────────────────────────────────────────
+@router.post(
+    "/ai/copilot",
+    response_model=AICopilotResponse,
+    summary="Copiloto industrial en lenguaje natural con Gemini AI",
+    tags=["ai"],
+)
+async def industrial_copilot_endpoint(req: CopilotQueryRequest, db: AsyncSession = Depends(get_db)):
+    """Consulta en lenguaje natural al copiloto del almacén."""
+    # 1. Total faltantes y top componentes con mayor faltante
+    short_items_q = await db.execute(
+        select(Shortage.name, func.sum(func.coalesce(Shortage.missing_quantity, 1)).label("qty"))
+        .where(Shortage.status == "open")
+        .group_by(Shortage.name)
+        .order_by(desc("qty"))
+        .limit(5)
+    )
+    top_shortages = [{"name": r[0], "missing": int(r[1] or 1)} for r in short_items_q.all()]
+
+    total_shortages_q = await db.execute(
+        select(func.count(Shortage.shortage_id)).where(Shortage.status == "open")
+    )
+    total_shortages = total_shortages_q.scalar() or 0
+
+    # 2. Órdenes con faltantes críticos
+    orders_q = await db.execute(
+        select(WorkOrder.code, func.count(Shortage.shortage_id).label("shortages_count"))
+        .join(Shortage, Shortage.work_order_id == WorkOrder.work_order_id)
+        .where(Shortage.status == "open", or_(WorkOrder.is_deleted == False, WorkOrder.is_deleted.is_(None)))
+        .group_by(WorkOrder.code)
+        .order_by(desc("shortages_count"))
+        .limit(5)
+    )
+    critical_orders = [{"code": r[0], "count": r[1]} for r in orders_q.all()]
+
+    # 3. Total y muestras de recepciones pendientes en muelle
+    unmatched_count_q = await db.execute(
+        select(func.count(UnmatchedReceipt.id)).where(UnmatchedReceipt.status == "pending")
+    )
+    total_unmatched = unmatched_count_q.scalar() or 0
+
+    unmatched_samples_q = await db.execute(
+        select(UnmatchedReceipt.part_number, UnmatchedReceipt.description, UnmatchedReceipt.quantity)
+        .where(UnmatchedReceipt.status == "pending")
+        .limit(5)
+    )
+    recent_unmatched = [
+        {"part_number": r[0], "description": r[1], "quantity": r[2]}
+        for r in unmatched_samples_q.all()
+    ]
+
+    shop_context = {
+        "total_shortages": total_shortages,
+        "total_unmatched": total_unmatched,
+        "top_shortages": top_shortages,
+        "critical_orders": critical_orders,
+        "recent_unmatched": recent_unmatched,
+    }
+
+    return await ask_industrial_copilot(req.query, shop_context)
+
