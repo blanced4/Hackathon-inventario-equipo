@@ -116,6 +116,8 @@ async def get_part_availability(
 
     return AvailabilityResponse(
         part_id=part_id,
+        name=part.name,
+        sku=part.sku,
         on_hand=total_on_hand,
         reserved=total_reserved,
         available=total_available,
@@ -307,6 +309,11 @@ async def get_open_shortages(
     response_model=ReorderSuggestionsResponse,
     summary="Sugerencias de compra para reabasto",
 )
+@router.get(
+    "/purchasing/reorder-suggestions",
+    response_model=ReorderSuggestionsResponse,
+    include_in_schema=False,
+)
 async def get_reorder_suggestions(db: AsyncSession = Depends(get_db)):
     short_q = await db.execute(
         select(
@@ -348,6 +355,11 @@ async def get_reorder_suggestions(db: AsyncSession = Depends(get_db)):
     "/unmatched-receipts",
     response_model=UnmatchedReceiptsResponse,
     summary="Compras que llegaron a recepción y no se identificaron",
+)
+@router.get(
+    "/purchasing/unmatched-receipts",
+    response_model=UnmatchedReceiptsResponse,
+    include_in_schema=False,
 )
 async def get_unmatched_receipts(db: AsyncSession = Depends(get_db)):
     unmatched_q = await db.execute(

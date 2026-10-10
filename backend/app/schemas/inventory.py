@@ -19,6 +19,8 @@ class LocationAvailability(BaseModel):
 
 class AvailabilityResponse(BaseModel):
     part_id: int
+    name: Optional[str] = None
+    sku: Optional[str] = None
     on_hand: int
     reserved: int
     available: int
